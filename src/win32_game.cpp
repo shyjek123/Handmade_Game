@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <windows.h>
 
 #define internal static
@@ -12,6 +13,8 @@ global int bitmapWidth;
 global int bitmapHeight;
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+internal void renderColors(int width, int height, int windowX, int winddowY,
+                           int bytesPerPixel);
 internal void Win32resizeDibSect(int width, int height);
 internal void Win32updateWind(HDC dc, RECT *WindowRect, int x, int y, int width,
                               int height);
@@ -32,16 +35,26 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL,
         inst, NULL);
     if (windHandle) {
+      int x = 0, y = 0;
       MSG msg = {};
       Running = true;
       while (Running) {
-        if (GetMessage(&msg, NULL, 0, 0) > 0) {
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE) > 0) {
           TranslateMessage(&msg);
           DispatchMessage(&msg);
-        } else {
-          break;
         }
+
+        RECT clientRect;
+        GetClientRect(windHandle, &clientRect);
+        int width = clientRect.right - clientRect.left;
+        int height = clientRect.bottom - clientRect.top;
+        renderColors(width, height, x, y, 4);
+        HDC deviceContext = GetDC(windHandle);
+        Win32updateWind(deviceContext, &clientRect, x, y, width, height);
+        ReleaseDC(windHandle, deviceContext);
+        x++;
       }
+
     } else {
       // TODO: LOGGING
     }
@@ -125,4 +138,22 @@ internal void Win32updateWind(HDC dc, RECT *WindowRect, int x, int y, int width,
   StretchDIBits(dc, 0, 0, bitmapWidth, bitmapHeight, 0, 0, windowWidth,
                 windowHeight, bitmapMemory, &bitmapInfo, DIB_RGB_COLORS,
                 SRCCOPY);
+}
+
+internal void renderColors(int width, int height, int windowX, int windowY,
+                           int bytesPerPixel) {
+
+  int Pitch = width * bytesPerPixel;
+  uint8_t *Row = (uint8_t *)bitmapMemory;
+  uint32_t *Pixel;
+  for (int pixelY = 0; pixelY < height; pixelY++) {
+    Pixel = (uint32_t *)Row;
+    for (int pixelX = 0; pixelX < width; pixelX++) {
+      uint8_t Green = pixelX + windowX;
+      uint8_t Blue = pixelY + windowY;
+      uint8_t Red = pixelY + windowX;
+      *Pixel++ = (Green << 8) | Blue | (Red << 16);
+    }
+    Row += Pitch;
+  }
 }
