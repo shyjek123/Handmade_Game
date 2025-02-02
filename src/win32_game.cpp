@@ -1,4 +1,4 @@
-#include <cstdint>
+#include <stdint.h>
 #include <windows.h>
 
 #define internal static
@@ -7,24 +7,43 @@
 
 global bool Running;
 
-global BITMAPINFO bitmapInfo;
-global void *bitmapMemory;
-global int bitmapWidth;
-global int bitmapHeight;
+struct Win32offScreenBuf {
+  BITMAPINFO info;
+  void *memory;
+  int width;
+  int height;
+  int bytesPerPixel;
+  int pitch;
+};
+global Win32offScreenBuf global_offscreenBuffer;
+
+struct winDimensions {
+  int width;
+  int height;
+};
+
+internal winDimensions Win32getWindowDimensions(HWND window) {
+  winDimensions result;
+  RECT clientRect;
+  GetClientRect(window, &clientRect);
+  result.width = clientRect.right - clientRect.left;
+  result.height = clientRect.bottom - clientRect.top;
+  return result;
+}
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-internal void renderColors(int width, int height, int windowX, int winddowY,
-                           int bytesPerPixel);
-internal void Win32resizeDibSect(int width, int height);
-internal void Win32updateWind(HDC dc, RECT *WindowRect, int x, int y, int width,
-                              int height);
+internal void renderColors(Win32offScreenBuf buffer, int WindowX, int WindowY);
+internal void Win32resizeDibSect(Win32offScreenBuf *buffer, int width,
+                                 int height);
+internal void Win32DisplayOffScreenBuffer(HDC dc, Win32offScreenBuf *buffer,
+                                          int x, int y, int width, int height);
 
 int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
                      int nCmdShow) {
   const char CLASS_NAME[] = "HandmadeWndClass";
 
   WNDCLASS wc = {};
-  wc.style = CS_OWNDC | CS_HREDRAW | CS_VREDRAW;
+  wc.style = CS_HREDRAW | CS_VREDRAW;
   wc.lpfnWndProc = WindowProc;
   wc.hInstance = inst;
   wc.lpszClassName = CLASS_NAME;
@@ -43,16 +62,15 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
           TranslateMessage(&msg);
           DispatchMessage(&msg);
         }
-
-        RECT clientRect;
-        GetClientRect(windHandle, &clientRect);
-        int width = clientRect.right - clientRect.left;
-        int height = clientRect.bottom - clientRect.top;
-        renderColors(width, height, x, y, 4);
+        winDimensions windowDimensions = Win32getWindowDimensions(windHandle);
+        renderColors(global_offscreenBuffer, x, y);
         HDC deviceContext = GetDC(windHandle);
-        Win32updateWind(deviceContext, &clientRect, x, y, width, height);
+        Win32DisplayOffScreenBuffer(deviceContext, &global_offscreenBuffer, 0,
+                                    0, windowDimensions.width,
+                                    windowDimensions.height);
         ReleaseDC(windHandle, deviceContext);
         x++;
+        y++;
       }
 
     } else {
@@ -68,11 +86,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   LRESULT result = 0;
   switch (msg) {
   case WM_SIZE: {
-    RECT clientRect;
-    GetClientRect(hwnd, &clientRect);
-    int width = clientRect.right - clientRect.left;
-    int height = clientRect.bottom - clientRect.top;
-    Win32resizeDibSect(width, height);
+    winDimensions windowDimensions = Win32getWindowDimensions(hwnd);
+    Win32resizeDibSect(&global_offscreenBuffer, windowDimensions.width,
+                       windowDimensions.height);
   } break;
   case WM_DESTROY: {
     Running = false;
@@ -89,14 +105,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
     int upperLeftX = ps.rcPaint.left;
     int upperLeftY = ps.rcPaint.top;
-    int width = ps.rcPaint.right - upperLeftX;
-    int height = ps.rcPaint.bottom - upperLeftY;
 
-    RECT clientRect;
-    GetClientRect(hwnd, &clientRect);
-
-    Win32updateWind(deviceContext, &clientRect, upperLeftX, upperLeftY, width,
-                    height);
+    winDimensions windowDimensions = Win32getWindowDimensions(hwnd);
+    Win32DisplayOffScreenBuffer(deviceContext, &global_offscreenBuffer,
+                                upperLeftX, upperLeftY, windowDimensions.width,
+                                windowDimensions.height);
     EndPaint(hwnd, &ps);
   } break;
   default: {
@@ -106,54 +119,51 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   return result;
 }
 
-internal void Win32resizeDibSect(int width, int height) {
-  if (bitmapMemory) {
-    VirtualFree(bitmapMemory, NULL, MEM_RELEASE);
+internal void Win32resizeDibSect(Win32offScreenBuf *buffer, int width,
+                                 int height) {
+  if (buffer->memory) {
+    VirtualFree(buffer->memory, NULL, MEM_RELEASE);
   }
 
-  bitmapWidth = width;
-  bitmapHeight = height;
+  buffer->width = width;
+  buffer->height = height;
 
-  bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
-  bitmapInfo.bmiHeader.biWidth = bitmapWidth;
-  bitmapInfo.bmiHeader.biHeight = -bitmapHeight;
-  bitmapInfo.bmiHeader.biPlanes = 1;
-  // NOTE: we are using 24bit color set, using 32 for DWORD alignment, to inc in
-  // 4 byte sets
-  bitmapInfo.bmiHeader.biBitCount = 32;
-  bitmapInfo.bmiHeader.biCompression = BI_RGB;
+  buffer->info.bmiHeader.biSize = sizeof(buffer->info.bmiHeader);
+  buffer->info.bmiHeader.biWidth = buffer->width;
+  buffer->info.bmiHeader.biHeight = -buffer->height;
+  buffer->info.bmiHeader.biPlanes = 1;
+  // NOTE: we are using 24bit color set, using 32bits for DWORD alignment, to
+  // inc in 4 byte sets
+  buffer->info.bmiHeader.biBitCount = 32;
+  buffer->info.bmiHeader.biCompression = BI_RGB;
 
-  int bytesPerPixel = 4;
-  int bitmapMemorySize = bytesPerPixel * (width * height);
+  buffer->bytesPerPixel = 4;
+  int memorySize = buffer->bytesPerPixel * (buffer->width * buffer->height);
 
-  bitmapMemory =
-      VirtualAlloc(NULL, bitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
+  buffer->memory = VirtualAlloc(NULL, memorySize, MEM_COMMIT, PAGE_READWRITE);
+
+  buffer->pitch = buffer->width * buffer->bytesPerPixel;
 }
 
-internal void Win32updateWind(HDC dc, RECT *WindowRect, int x, int y, int width,
-                              int height) {
+internal void Win32DisplayOffScreenBuffer(HDC dc, Win32offScreenBuf *buffer,
+                                          int x, int y, int width, int height) {
 
-  int windowWidth = WindowRect->right - WindowRect->left;
-  int windowHeight = WindowRect->bottom - WindowRect->top;
-  StretchDIBits(dc, 0, 0, bitmapWidth, bitmapHeight, 0, 0, windowWidth,
-                windowHeight, bitmapMemory, &bitmapInfo, DIB_RGB_COLORS,
-                SRCCOPY);
+  StretchDIBits(dc, 0, 0, buffer->width, buffer->height, 0, 0, width, height,
+                buffer->memory, &buffer->info, DIB_RGB_COLORS, SRCCOPY);
 }
 
-internal void renderColors(int width, int height, int windowX, int windowY,
-                           int bytesPerPixel) {
+internal void renderColors(Win32offScreenBuf buffer, int windowX, int windowY) {
 
-  int Pitch = width * bytesPerPixel;
-  uint8_t *Row = (uint8_t *)bitmapMemory;
+  uint8_t *Row = (uint8_t *)buffer.memory;
   uint32_t *Pixel;
-  for (int pixelY = 0; pixelY < height; pixelY++) {
+  for (int pixelY = 0; pixelY < buffer.height; pixelY++) {
     Pixel = (uint32_t *)Row;
-    for (int pixelX = 0; pixelX < width; pixelX++) {
+    for (int pixelX = 0; pixelX < buffer.width; pixelX++) {
       uint8_t Green = pixelX + windowX;
       uint8_t Blue = pixelY + windowY;
       uint8_t Red = pixelY + windowX;
       *Pixel++ = (Green << 8) | Blue | (Red << 16);
     }
-    Row += Pitch;
+    Row += buffer.pitch;
   }
 }
