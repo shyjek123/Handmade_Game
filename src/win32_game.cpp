@@ -1,3 +1,4 @@
+#include <cassert>
 #include <stdint.h>
 #include <windows.h>
 
@@ -21,7 +22,6 @@ struct winDimensions {
   int width;
   int height;
 };
-
 internal winDimensions Win32getWindowDimensions(HWND window) {
   winDimensions result;
   RECT clientRect;
@@ -43,6 +43,7 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
   const char CLASS_NAME[] = "HandmadeWndClass";
 
   WNDCLASS wc = {};
+  Win32resizeDibSect(&global_offscreenBuffer, 1280, 720);
   wc.style = CS_HREDRAW | CS_VREDRAW;
   wc.lpfnWndProc = WindowProc;
   wc.hInstance = inst;
@@ -55,9 +56,9 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
         inst, NULL);
     if (windHandle) {
       int x = 0, y = 0;
-      MSG msg = {};
       Running = true;
       while (Running) {
+        MSG msg;
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE) > 0) {
           TranslateMessage(&msg);
           DispatchMessage(&msg);
@@ -69,8 +70,8 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
                                     0, windowDimensions.width,
                                     windowDimensions.height);
         ReleaseDC(windHandle, deviceContext);
-        x++;
-        y++;
+        ++x;
+        y += 2;
       }
 
     } else {
@@ -86,9 +87,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   LRESULT result = 0;
   switch (msg) {
   case WM_SIZE: {
-    winDimensions windowDimensions = Win32getWindowDimensions(hwnd);
-    Win32resizeDibSect(&global_offscreenBuffer, windowDimensions.width,
-                       windowDimensions.height);
   } break;
   case WM_DESTROY: {
     Running = false;
@@ -146,9 +144,10 @@ internal void Win32resizeDibSect(Win32offScreenBuf *buffer, int width,
 }
 
 internal void Win32DisplayOffScreenBuffer(HDC dc, Win32offScreenBuf *buffer,
-                                          int x, int y, int width, int height) {
-
-  StretchDIBits(dc, 0, 0, buffer->width, buffer->height, 0, 0, width, height,
+                                          int x, int y, int wWidth,
+                                          int wHeight) {
+  // TODO: aspect ratio correction
+  StretchDIBits(dc, 0, 0, wWidth, wHeight, 0, 0, buffer->width, buffer->height,
                 buffer->memory, &buffer->info, DIB_RGB_COLORS, SRCCOPY);
 }
 
@@ -156,13 +155,13 @@ internal void renderColors(Win32offScreenBuf buffer, int windowX, int windowY) {
 
   uint8_t *Row = (uint8_t *)buffer.memory;
   uint32_t *Pixel;
-  for (int pixelY = 0; pixelY < buffer.height; pixelY++) {
+  for (int pixelY = 0; pixelY < buffer.height; ++pixelY) {
     Pixel = (uint32_t *)Row;
-    for (int pixelX = 0; pixelX < buffer.width; pixelX++) {
+    for (int pixelX = 0; pixelX < buffer.width; ++pixelX) {
       uint8_t Green = pixelX + windowX;
       uint8_t Blue = pixelY + windowY;
-      uint8_t Red = pixelY + windowX;
-      *Pixel++ = (Green << 8) | Blue | (Red << 16);
+      //      uint8_t Red = pixelY + windowX;
+      *Pixel++ = (Green << 8) | Blue;
     }
     Row += buffer.pitch;
   }
