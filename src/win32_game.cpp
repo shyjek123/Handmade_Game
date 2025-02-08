@@ -1,6 +1,7 @@
 #include <cassert>
 #include <stdint.h>
 #include <windows.h>
+#include <xinput.h>
 
 #define internal static
 #define local_persist static
@@ -31,6 +32,23 @@ internal winDimensions Win32getWindowDimensions(HWND window) {
   return result;
 }
 
+#define XINPUT_GET_STATE(name)                                                 \
+  DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE *pState)
+typedef XINPUT_GET_STATE(xinput_getstate);
+XINPUT_GET_STATE(xinputGetStateStub) { return 0; }
+global xinput_getstate *XinputGetState_ = xinputGetStateStub;
+#define XinputGetState XinputGetState_
+
+internal void LoadNeededWin32Libs() {
+  HMODULE xinputMod = LoadLibraryA("xinput1_3.dll");
+  if (xinputMod) {
+    XinputGetState =
+        (xinput_getstate *)GetProcAddress(xinputMod, "XinputGetState");
+  } else {
+    OutputDebugStringA("failed to load input mod");
+  }
+}
+
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 internal void renderColors(Win32offScreenBuf buffer, int WindowX, int WindowY);
 internal void Win32resizeDibSect(Win32offScreenBuf *buffer, int width,
@@ -57,11 +75,30 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
     if (windHandle) {
       int x = 0, y = 0;
       Running = true;
+      LoadNeededWin32Libs();
       while (Running) {
         MSG msg;
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE) > 0) {
           TranslateMessage(&msg);
           DispatchMessage(&msg);
+        }
+        for (DWORD controllerIndex = 0; controllerIndex < XUSER_MAX_COUNT;
+             controllerIndex++) {
+          XINPUT_STATE state;
+          ZeroMemory(&state, sizeof(XINPUT_STATE));
+
+          if (XinputGetState(controllerIndex, &state) == ERROR_SUCCESS) {
+            // Controller is connected
+
+            XINPUT_GAMEPAD *pad = &state.Gamepad;
+            // do actions based on input received
+
+            // NOTE: Maybe have to end up handling Deadzone
+            // MSDN:
+            //  https://learn.microsoft.com/en-us/windows/win32/xinput/getting-started-with-xinput#getting-controller-state
+          } else {
+            // Controller is not connected
+          }
         }
         winDimensions windowDimensions = Win32getWindowDimensions(windHandle);
         renderColors(global_offscreenBuffer, x, y);
@@ -110,6 +147,56 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                                 windowDimensions.height);
     EndPaint(hwnd, &ps);
   } break;
+  case WM_KEYDOWN: {
+    uint32_t keycode = wParam;
+    bool wasDown = (((lParam & (1 << 30)) != 0));
+    bool isDown = (((lParam & (1 << 31)) == 0));
+    switch (keycode) {
+    case VK_LEFT:
+      // Process the LEFT ARROW key.
+      break;
+
+    case VK_RIGHT:
+      // Process the RIGHT ARROW key.
+      break;
+
+    case VK_UP:
+      // Process the UP ARROW key.
+      break;
+
+    case VK_DOWN:
+      // Process the DOWN ARROW key.
+      break;
+
+    case 'W':
+      break;
+
+    case 'A':
+      // Process the INS key.
+      break;
+
+    case 'S':
+      break;
+    case 'D':
+      break;
+    case 'Q':
+      break;
+    case 'E':
+      break;
+
+    case VK_ESCAPE:
+      // Process the Esc key.
+      break;
+
+    case VK_SPACE:
+      OutputDebugString("SPACE PRESSED");
+      break;
+
+    default:
+      // Process other non-character keystrokes.
+      break;
+    }
+  }
   default: {
     result = DefWindowProc(hwnd, msg, wParam, lParam);
   } break;
