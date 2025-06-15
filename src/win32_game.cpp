@@ -2,12 +2,11 @@
 #include <stdint.h>
 #include <windows.h>
 #include <xinput.h>
-
 #define internal static
 #define local_persist static
 #define global static
 
-global bool Running;
+global bool global_running;
 
 struct Win32offScreenBuf {
   BITMAPINFO info;
@@ -35,15 +34,17 @@ internal winDimensions Win32getWindowDimensions(HWND window) {
 #define XINPUT_GET_STATE(name)                                                 \
   DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE *pState)
 typedef XINPUT_GET_STATE(xinput_getstate);
-XINPUT_GET_STATE(xinputGetStateStub) { return 0; }
+XINPUT_GET_STATE(xinputGetStateStub) { return ERROR_DEVICE_NOT_CONNECTED; }
 global xinput_getstate *XinputGetState_ = xinputGetStateStub;
 #define XinputGetState XinputGetState_
 
 internal void LoadNeededWin32Libs() {
-  HMODULE xinputMod = LoadLibraryA("xinput1_3.dll");
-  if (xinputMod) {
+  HMODULE xinput_library = LoadLibraryA("xinput1_4.dll");
+  if (!xinput_library)
+    xinput_library = LoadLibraryA("xinput1_3.dll");
+  if (xinput_library) {
     XinputGetState =
-        (xinput_getstate *)GetProcAddress(xinputMod, "XinputGetState");
+        (xinput_getstate *)GetProcAddress(xinput_library, "XinputGetState");
   } else {
     OutputDebugStringA("failed to load input mod");
   }
@@ -74,9 +75,9 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
         inst, NULL);
     if (windHandle) {
       int x = 0, y = 0;
-      Running = true;
+      global_running = true;
       LoadNeededWin32Libs();
-      while (Running) {
+      while (global_running) {
         MSG msg;
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE) > 0) {
           TranslateMessage(&msg);
@@ -126,14 +127,62 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   case WM_SIZE: {
   } break;
   case WM_DESTROY: {
-    Running = false;
+    global_running = false;
   } break;
   case WM_CLOSE: {
-    Running = false;
+    global_running = false;
   } break;
   case WM_ACTIVATEAPP: {
     OutputDebugString("WM_ACTIVATEAPP");
   } break;
+  case WM_SYSKEYDOWN:
+  case WM_SYSKEYUP:
+  case WM_KEYDOWN:
+  case WM_KEYUP: {
+    uint32_t keycode = wParam;
+    bool was_down = (((lParam & (1 << 30)) != 0));
+    bool is_down = (((lParam & (1 << 31)) == 0));
+    if (was_down != is_down) {
+      if (keycode == 'W') {
+
+      } else if (keycode == 'A') {
+        // Process the INS key.
+      } else if (keycode == 'S') {
+      } else if (keycode == 'D') {
+      } else if (keycode == 'Q') {
+      } else if (keycode == 'E') {
+
+      } else if (keycode == VK_LEFT) {
+        // Process the LEFT ARROW key.
+
+      } else if (keycode == VK_RIGHT) {
+        // Process the RIGHT ARROW key.
+
+      } else if (keycode == VK_UP) {
+        // Process the UP ARROW key.
+
+      } else if (keycode == VK_DOWN) {
+        // Process the DOWN ARROW key.
+
+      } else if (keycode == VK_ESCAPE) {
+        OutputDebugString("ESCAPE: ");
+        if (is_down)
+          OutputDebugString("is_down ");
+        if (was_down)
+          OutputDebugString("was_down ");
+        OutputDebugString("\n");
+      }
+    } else if (keycode == VK_SPACE) {
+      OutputDebugString("SPACE PRESSED");
+    }
+
+    bool alt_key_was_down = ((lParam & (1 << 29)) != 0);
+    if (keycode == VK_F4 && alt_key_was_down) {
+      global_running = false;
+    }
+
+  } break;
+
   case WM_PAINT: {
     PAINTSTRUCT ps;
     HDC deviceContext = BeginPaint(hwnd, &ps);
@@ -147,56 +196,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                                 windowDimensions.height);
     EndPaint(hwnd, &ps);
   } break;
-  case WM_KEYDOWN: {
-    uint32_t keycode = wParam;
-    bool wasDown = (((lParam & (1 << 30)) != 0));
-    bool isDown = (((lParam & (1 << 31)) == 0));
-    switch (keycode) {
-    case VK_LEFT:
-      // Process the LEFT ARROW key.
-      break;
-
-    case VK_RIGHT:
-      // Process the RIGHT ARROW key.
-      break;
-
-    case VK_UP:
-      // Process the UP ARROW key.
-      break;
-
-    case VK_DOWN:
-      // Process the DOWN ARROW key.
-      break;
-
-    case 'W':
-      break;
-
-    case 'A':
-      // Process the INS key.
-      break;
-
-    case 'S':
-      break;
-    case 'D':
-      break;
-    case 'Q':
-      break;
-    case 'E':
-      break;
-
-    case VK_ESCAPE:
-      // Process the Esc key.
-      break;
-
-    case VK_SPACE:
-      OutputDebugString("SPACE PRESSED");
-      break;
-
-    default:
-      // Process other non-character keystrokes.
-      break;
-    }
-  }
   default: {
     result = DefWindowProc(hwnd, msg, wParam, lParam);
   } break;
@@ -217,8 +216,8 @@ internal void Win32resizeDibSect(Win32offScreenBuf *buffer, int width,
   buffer->info.bmiHeader.biWidth = buffer->width;
   buffer->info.bmiHeader.biHeight = -buffer->height;
   buffer->info.bmiHeader.biPlanes = 1;
-  // NOTE: we are using 24bit color set, using 32bits for DWORD alignment, to
-  // inc in 4 byte sets
+  // NOTE: we are using 24bit color set, using 32bits for DWORD alignment,
+  // to inc in 4 byte sets
   buffer->info.bmiHeader.biBitCount = 32;
   buffer->info.bmiHeader.biCompression = BI_RGB;
 
