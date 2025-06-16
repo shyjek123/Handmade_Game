@@ -1,6 +1,7 @@
 #include <cassert>
 #include <stdint.h>
 #include <windows.h>
+#include <xaudio2.h>
 #include <xinput.h>
 #define internal static
 #define local_persist static
@@ -29,6 +30,44 @@ internal winDimensions Win32getWindowDimensions(HWND window) {
   result.width = clientRect.right - clientRect.left;
   result.height = clientRect.bottom - clientRect.top;
   return result;
+}
+typedef HRESULT(WINAPI *XAUDIO2CREATE_def)(IXAudio2 **ppXAudio2, UINT32 Flags,
+                                           XAUDIO2_PROCESSOR XAudio2Processor);
+
+internal int init_xaudio2() {
+  // INFO: primary buffer contains audio that the listener will hear
+  //     secondary buffer contain single sound or stream of audio
+  HMODULE hXAudio2 = LoadLibrary("xaudio2_9.dll");
+  if (!hXAudio2) {
+    OutputDebugStringA("Failed to load xaudio2_9.dll");
+    return 1;
+  }
+
+  XAUDIO2CREATE_def pXAudio2Create =
+      (XAUDIO2CREATE_def)GetProcAddress(hXAudio2, "XAudio2Create");
+  if (!pXAudio2Create) {
+    OutputDebugStringA("Failed to get addr of XAudio2Create");
+    FreeLibrary(hXAudio2);
+    return 1;
+  }
+
+  IXAudio2 *pXAudio2 = {0};
+  HRESULT hr = pXAudio2Create(&pXAudio2, 0, XAUDIO2_DEFAULT_PROCESSOR);
+  if (FAILED(hr)) {
+    OutputDebugStringA("Failed to use pXAudio2Create");
+    FreeLibrary(hXAudio2);
+    return 1;
+  }
+
+  OutputDebugStringA("Successfully created XAduio2 engine!");
+  // TODO:
+  //   1. populate a WAVEFORMATEX structure and an XAUDIO2_BUFFER structure
+  //   2. creaet source voice
+  //   3. submit audio buffer to source voice
+  //   4. call start function
+  pXAudio2->Release();
+  FreeLibrary(hXAudio2);
+  return 0;
 }
 
 #define XINPUT_GET_STATE(name)                                                 \
