@@ -1,4 +1,5 @@
 #include <cassert>
+#include <math.h>
 #include <stdint.h>
 #include <windows.h>
 #include <xaudio2.h>
@@ -34,9 +35,7 @@ internal winDimensions Win32getWindowDimensions(HWND window) {
 typedef HRESULT(WINAPI *XAUDIO2CREATE_def)(IXAudio2 **ppXAudio2, UINT32 Flags,
                                            XAUDIO2_PROCESSOR XAudio2Processor);
 
-internal int init_xaudio2() {
-  // INFO: primary buffer contains audio that the listener will hear
-  //     secondary buffer contain single sound or stream of audio
+internal int init_play_xaudio2() {
   HMODULE hXAudio2 = LoadLibrary("xaudio2_9.dll");
   if (!hXAudio2) {
     OutputDebugStringA("Failed to load xaudio2_9.dll");
@@ -62,9 +61,74 @@ internal int init_xaudio2() {
   OutputDebugStringA("Successfully created XAduio2 engine!");
   // TODO:
   //   1. populate a WAVEFORMATEX structure and an XAUDIO2_BUFFER structure
-  //   2. creaet source voice
+  //   2. create source and master voice
   //   3. submit audio buffer to source voice
   //   4. call start function
+
+  // INFO: vars to initialize
+  // Constant literals.
+  constexpr WORD BITSPERSSAMPLE = 16;    // 16 bits per sample.
+  constexpr DWORD SAMPLESPERSEC = 44100; // 44,100 samples per second.
+  constexpr double CYCLESPERSEC =
+      220.0; // 220 cycles per second (frequency of the audible tone).
+  constexpr double VOLUME = 0.5;               // 50% volume.
+  constexpr WORD AUDIOBUFFERSIZEINCYCLES = 10; // 10 cycles per audio buffer.
+  constexpr double PI = 3.14159265358979323846;
+  // Calculated constants.
+  constexpr DWORD SAMPLESPERCYCLE =
+      (DWORD)(SAMPLESPERSEC / CYCLESPERSEC); // 200 samples per cycle.
+  constexpr DWORD AUDIOBUFFERSIZEINSAMPLES =
+      SAMPLESPERCYCLE * AUDIOBUFFERSIZEINCYCLES; // 2,000 samples per buffer.
+  constexpr UINT32 AUDIOBUFFERSIZEINBYTES =
+      AUDIOBUFFERSIZEINSAMPLES * BITSPERSSAMPLE / 8; // 4,000 bytes per buffer.
+
+  byte main_audio[AUDIOBUFFERSIZEINBYTES] = {};
+
+  // create master voice
+  IXAudio2MasteringVoice *master_voice;
+  pXAudio2->CreateMasteringVoice(&master_voice);
+
+  // define the audio settings/format
+  WAVEFORMATEX waveformatex_struct;
+  waveformatex_struct.wFormatTag = WAVE_FORMAT_PCM;
+  waveformatex_struct.nChannels = 1;
+  waveformatex_struct.nSamplesPerSec = SAMPLESPERSEC;
+  waveformatex_struct.nBlockAlign =
+      waveformatex_struct.nChannels * BITSPERSSAMPLE / 8;
+  waveformatex_struct.nAvgBytesPerSec =
+      waveformatex_struct.nSamplesPerSec * waveformatex_struct.nBlockAlign;
+  waveformatex_struct.wBitsPerSample = BITSPERSSAMPLE;
+  waveformatex_struct.cbSize = 0;
+
+  // create source voice
+  IXAudio2SourceVoice *source_voice;
+  pXAudio2->CreateSourceVoice(&source_voice, &waveformatex_struct);
+
+  // TODO: go back over this code understand why you do all of this
+  // fill the audio buffer
+  double phase{};
+  uint32_t bufferidx{};
+  while (bufferidx < AUDIOBUFFERSIZEINBYTES) {
+    phase += (2 * PI) / SAMPLESPERCYCLE;
+    int16_t sample = (int16_t)(sin(phase) * INT16_MAX * VOLUME);
+    main_audio[bufferidx++] = (byte)sample; // values are little endian
+    main_audio[bufferidx++] = (byte)(sample >> 8);
+  }
+  // filling out the xaudio2_buffer
+  XAUDIO2_BUFFER xaudio2_buffer = {};
+  xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
+  xaudio2_buffer.AudioBytes = AUDIOBUFFERSIZEINBYTES;
+  xaudio2_buffer.pAudioData = main_audio;
+  xaudio2_buffer.PlayBegin = 0;
+  xaudio2_buffer.PlayLength = 0;
+  xaudio2_buffer.LoopBegin = 0;
+  xaudio2_buffer.LoopLength = 0;
+  xaudio2_buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
+
+  // submit and play the buffer
+  source_voice->SubmitSourceBuffer(&xaudio2_buffer);
+  source_voice->Start(0);
+
   pXAudio2->Release();
   FreeLibrary(hXAudio2);
   return 0;
@@ -76,7 +140,6 @@ typedef XINPUT_GET_STATE(xinput_getstate);
 XINPUT_GET_STATE(xinputGetStateStub) { return ERROR_DEVICE_NOT_CONNECTED; }
 global xinput_getstate *XinputGetState_ = xinputGetStateStub;
 #define XinputGetState XinputGetState_
-
 internal void LoadNeededWin32Libs() {
   HMODULE xinput_library = LoadLibraryA("xinput1_4.dll");
   if (!xinput_library)
