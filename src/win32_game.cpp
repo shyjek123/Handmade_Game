@@ -9,7 +9,7 @@
 #define global static
 
 global bool global_running;
-
+typedef int32_t bool32;
 struct Win32offScreenBuf {
   BITMAPINFO info;
   void *memory;
@@ -35,7 +35,10 @@ internal winDimensions Win32getWindowDimensions(HWND window) {
 typedef HRESULT(WINAPI *XAUDIO2CREATE_def)(IXAudio2 **ppXAudio2, UINT32 Flags,
                                            XAUDIO2_PROCESSOR XAudio2Processor);
 
-internal int init_play_xaudio2() {
+internal int init_test_xaudio2() {
+  // INFO: load and create instance of xaduio2
+
+  IXAudio2 *pXAudio2 = {0};
   HMODULE hXAudio2 = LoadLibrary("xaudio2_9.dll");
   if (!hXAudio2) {
     OutputDebugStringA("Failed to load xaudio2_9.dll");
@@ -50,7 +53,6 @@ internal int init_play_xaudio2() {
     return 1;
   }
 
-  IXAudio2 *pXAudio2 = {0};
   HRESULT hr = pXAudio2Create(&pXAudio2, 0, XAUDIO2_DEFAULT_PROCESSOR);
   if (FAILED(hr)) {
     OutputDebugStringA("Failed to use pXAudio2Create");
@@ -65,15 +67,16 @@ internal int init_play_xaudio2() {
   //   3. submit audio buffer to source voice
   //   4. call start function
 
-  // INFO: vars to initialize
-  // Constant literals.
+  // INFO: vars needed
   constexpr WORD BITSPERSSAMPLE = 16;    // 16 bits per sample.
   constexpr DWORD SAMPLESPERSEC = 44100; // 44,100 samples per second.
-  constexpr double CYCLESPERSEC =
-      220.0; // 220 cycles per second (frequency of the audible tone).
-  constexpr double VOLUME = 0.5;               // 50% volume.
+  // 220 cycles per second (frequency of the audible tone).
+  constexpr double CYCLESPERSEC = 174.0;
+  constexpr double VOLUME = 0.05;
+  constexpr DWORD FADEDURATION = 500;
   constexpr WORD AUDIOBUFFERSIZEINCYCLES = 10; // 10 cycles per audio buffer.
   constexpr double PI = 3.14159265358979323846;
+
   // Calculated constants.
   constexpr DWORD SAMPLESPERCYCLE =
       (DWORD)(SAMPLESPERSEC / CYCLESPERSEC); // 200 samples per cycle.
@@ -82,6 +85,7 @@ internal int init_play_xaudio2() {
   constexpr UINT32 AUDIOBUFFERSIZEINBYTES =
       AUDIOBUFFERSIZEINSAMPLES * BITSPERSSAMPLE / 8; // 4,000 bytes per buffer.
 
+  // audio buffer
   byte main_audio[AUDIOBUFFERSIZEINBYTES] = {};
 
   // create master voice
@@ -108,11 +112,25 @@ internal int init_play_xaudio2() {
   // fill the audio buffer
   double phase{};
   uint32_t bufferidx{};
+  uint32_t sampleidx{};
   while (bufferidx < AUDIOBUFFERSIZEINBYTES) {
+    double amplitude = VOLUME;
     phase += (2 * PI) / SAMPLESPERCYCLE;
+    if (phase >= 2 * PI)
+      phase -= 2 * PI;
+    // Apply fade-in and fade-out
+    if (sampleidx < FADEDURATION) {
+      amplitude *= (double)sampleidx / FADEDURATION;
+    } else if (sampleidx > AUDIOBUFFERSIZEINSAMPLES - FADEDURATION) {
+      amplitude *=
+          (double)(AUDIOBUFFERSIZEINSAMPLES - sampleidx) / FADEDURATION;
+    }
     int16_t sample = (int16_t)(sin(phase) * INT16_MAX * VOLUME);
-    main_audio[bufferidx++] = (byte)sample; // values are little endian
+
+    // writing values in little endian
+    main_audio[bufferidx++] = (byte)sample;
     main_audio[bufferidx++] = (byte)(sample >> 8);
+    ++sampleidx;
   }
   // filling out the xaudio2_buffer
   XAUDIO2_BUFFER xaudio2_buffer = {};
@@ -129,8 +147,6 @@ internal int init_play_xaudio2() {
   source_voice->SubmitSourceBuffer(&xaudio2_buffer);
   source_voice->Start(0);
 
-  pXAudio2->Release();
-  FreeLibrary(hXAudio2);
   return 0;
 }
 
@@ -140,6 +156,7 @@ typedef XINPUT_GET_STATE(xinput_getstate);
 XINPUT_GET_STATE(xinputGetStateStub) { return ERROR_DEVICE_NOT_CONNECTED; }
 global xinput_getstate *XinputGetState_ = xinputGetStateStub;
 #define XinputGetState XinputGetState_
+
 internal void LoadNeededWin32Libs() {
   HMODULE xinput_library = LoadLibraryA("xinput1_4.dll");
   if (!xinput_library)
@@ -178,6 +195,9 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
     if (windHandle) {
       int x = 0, y = 0;
       global_running = true;
+
+      // init_test_xaudio2();
+
       LoadNeededWin32Libs();
       while (global_running) {
         MSG msg;
@@ -185,24 +205,24 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
           TranslateMessage(&msg);
           DispatchMessage(&msg);
         }
-        for (DWORD controllerIndex = 0; controllerIndex < XUSER_MAX_COUNT;
-             controllerIndex++) {
-          XINPUT_STATE state;
-          ZeroMemory(&state, sizeof(XINPUT_STATE));
+        // ERROR: memory issue with controller access
+        //
+        // for (DWORD controllerIndex = 0; controllerIndex < XUSER_MAX_COUNT;
+        //      controllerIndex++) {
+        //   XINPUT_STATE state;
+        //   ZeroMemory(&state, sizeof(XINPUT_STATE));
+        //   if (XinputGetState(controllerIndex, &state) == ERROR_SUCCESS) {
+        //     // Controller is connected
+        //     // do actions based on input received
+        //     // NOTE: Maybe have to end up handling Deadzone
+        //     // MSDN:
+        //          https://learn.microsoft.com/en-us/windows/win32/xinput/getting-started-with-xinput#getting-controller-state
+        //
+        //   } else {
+        //     // Controller is not connected
+        //   }
+        // }
 
-          if (XinputGetState(controllerIndex, &state) == ERROR_SUCCESS) {
-            // Controller is connected
-
-            XINPUT_GAMEPAD *pad = &state.Gamepad;
-            // do actions based on input received
-
-            // NOTE: Maybe have to end up handling Deadzone
-            // MSDN:
-            //  https://learn.microsoft.com/en-us/windows/win32/xinput/getting-started-with-xinput#getting-controller-state
-          } else {
-            // Controller is not connected
-          }
-        }
         winDimensions windowDimensions = Win32getWindowDimensions(windHandle);
         renderColors(global_offscreenBuffer, x, y);
         HDC deviceContext = GetDC(windHandle);
@@ -220,6 +240,7 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
   } else {
     // TODO: LOGGING
   }
+
   return 0;
 }
 
