@@ -34,6 +34,9 @@ internal winDimensions Win32getWindowDimensions(HWND window) {
 }
 typedef HRESULT(WINAPI *XAUDIO2CREATE_def)(IXAudio2 **ppXAudio2, UINT32 Flags,
                                            XAUDIO2_PROCESSOR XAudio2Processor);
+typedef DWORD(WINAPI *XINPUT_GET_STATE_def)(DWORD dwUserIndex,
+                                            XINPUT_STATE *pState);
+global XINPUT_GET_STATE_def XinputGetState;
 
 internal int init_test_xaudio2() {
   // INFO: load and create instance of xaduio2
@@ -150,20 +153,13 @@ internal int init_test_xaudio2() {
   return 0;
 }
 
-#define XINPUT_GET_STATE(name)                                                 \
-  DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE *pState)
-typedef XINPUT_GET_STATE(xinput_getstate);
-XINPUT_GET_STATE(xinputGetStateStub) { return ERROR_DEVICE_NOT_CONNECTED; }
-global xinput_getstate *XinputGetState_ = xinputGetStateStub;
-#define XinputGetState XinputGetState_
-
 internal void LoadNeededWin32Libs() {
   HMODULE xinput_library = LoadLibraryA("xinput1_4.dll");
   if (!xinput_library)
     xinput_library = LoadLibraryA("xinput1_3.dll");
   if (xinput_library) {
     XinputGetState =
-        (xinput_getstate *)GetProcAddress(xinput_library, "XinputGetState");
+        (XINPUT_GET_STATE_def)GetProcAddress(xinput_library, "XInputGetState");
   } else {
     OutputDebugStringA("failed to load input mod");
   }
@@ -199,29 +195,30 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
       // init_test_xaudio2();
 
       LoadNeededWin32Libs();
+
       while (global_running) {
         MSG msg;
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE) > 0) {
           TranslateMessage(&msg);
           DispatchMessage(&msg);
         }
-        // ERROR: memory issue with controller access
-        //
-        // for (DWORD controllerIndex = 0; controllerIndex < XUSER_MAX_COUNT;
-        //      controllerIndex++) {
-        //   XINPUT_STATE state;
-        //   ZeroMemory(&state, sizeof(XINPUT_STATE));
-        //   if (XinputGetState(controllerIndex, &state) == ERROR_SUCCESS) {
-        //     // Controller is connected
-        //     // do actions based on input received
-        //     // NOTE: Maybe have to end up handling Deadzone
-        //     // MSDN:
-        //          https://learn.microsoft.com/en-us/windows/win32/xinput/getting-started-with-xinput#getting-controller-state
-        //
-        //   } else {
-        //     // Controller is not connected
-        //   }
-        // }
+
+        for (DWORD controllerIndex = 0; controllerIndex < XUSER_MAX_COUNT;
+             controllerIndex++) {
+          XINPUT_STATE state{};
+          ZeroMemory(&state, sizeof(XINPUT_STATE));
+          if (XinputGetState(controllerIndex, &state) == ERROR_SUCCESS) {
+            // Controller is connected
+            // do actions based on input received
+            // NOTE: Maybe have to end up handling Deadzone
+            // MSDN:
+            // https: //
+            //    learn.microsoft.com/en-us/windows/win32/xinput/getting-started-with-xinput#getting-controller-state
+
+          } else {
+            // Controller is not connected
+          }
+        }
 
         winDimensions windowDimensions = Win32getWindowDimensions(windHandle);
         renderColors(global_offscreenBuffer, x, y);
@@ -231,7 +228,7 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
                                     windowDimensions.height);
         ReleaseDC(windHandle, deviceContext);
         ++x;
-        y += 2;
+        y++;
       }
 
     } else {
