@@ -8,6 +8,11 @@
 #define local_persist static
 #define global static
 
+// TODO:
+// 1. separate code and definitions into header/separate files (only main func
+// in this file)
+//
+
 global bool global_running;
 typedef int32_t bool32;
 struct Win32offScreenBuf {
@@ -177,38 +182,54 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
   const char CLASS_NAME[] = "HandmadeWndClass";
 
   WNDCLASS wc = {};
+
   Win32resizeDibSect(&global_offscreenBuffer, 1280, 720);
-  wc.style = CS_HREDRAW | CS_VREDRAW;
+
+  wc.style = CS_VREDRAW | CS_HREDRAW;
   wc.lpfnWndProc = WindowProc;
   wc.hInstance = inst;
   wc.lpszClassName = CLASS_NAME;
 
   if (RegisterClass(&wc)) {
     HWND windHandle = CreateWindowEx(
-        0, CLASS_NAME, "Handmade Hero", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL,
-        inst, NULL);
+        0, wc.lpszClassName, "Handmade Hero", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, inst,
+        0);
     if (windHandle) {
-      int x = 0, y = 0;
       global_running = true;
+      double x = 0, y = 0;
 
-      // init_test_xaudio2();
+      init_test_xaudio2();
 
       LoadNeededWin32Libs();
 
       while (global_running) {
         MSG msg;
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE) > 0) {
+          if (msg.message == WM_QUIT)
+            global_running = false;
+
           TranslateMessage(&msg);
           DispatchMessage(&msg);
         }
 
+        // Drawing to Window
+        renderColors(global_offscreenBuffer, x, y);
+        HDC deviceContext = GetDC(windHandle);
+        winDimensions windowDimensions = Win32getWindowDimensions(windHandle);
+        Win32DisplayOffScreenBuffer(deviceContext, &global_offscreenBuffer, 0,
+                                    0, windowDimensions.width,
+                                    windowDimensions.height);
+        ReleaseDC(windHandle, deviceContext);
+
+        // Gamepad input handling
         for (DWORD controllerIndex = 0; controllerIndex < XUSER_MAX_COUNT;
              controllerIndex++) {
           XINPUT_STATE state{};
           ZeroMemory(&state, sizeof(XINPUT_STATE));
           if (XinputGetState(controllerIndex, &state) == ERROR_SUCCESS) {
             // Controller is connected
+            XINPUT_GAMEPAD *pad = &state.Gamepad;
             // do actions based on input received
             // NOTE: Maybe have to end up handling Deadzone
             // MSDN:
@@ -220,15 +241,7 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
           }
         }
 
-        winDimensions windowDimensions = Win32getWindowDimensions(windHandle);
-        renderColors(global_offscreenBuffer, x, y);
-        HDC deviceContext = GetDC(windHandle);
-        Win32DisplayOffScreenBuffer(deviceContext, &global_offscreenBuffer, 0,
-                                    0, windowDimensions.width,
-                                    windowDimensions.height);
-        ReleaseDC(windHandle, deviceContext);
-        ++x;
-        y++;
+        x += 0.5;
       }
 
     } else {
@@ -244,8 +257,6 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   LRESULT result = 0;
   switch (msg) {
-  case WM_SIZE: {
-  } break;
   case WM_DESTROY: {
     global_running = false;
   } break;
@@ -309,6 +320,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
     int upperLeftX = ps.rcPaint.left;
     int upperLeftY = ps.rcPaint.top;
+    // casey does not use
+    // int width = ps.rcPaint.right - ps.rcPaint.left;
+    // int height = ps.rcPaint.bottom - ps.rcPaint.top;
 
     winDimensions windowDimensions = Win32getWindowDimensions(hwnd);
     Win32DisplayOffScreenBuffer(deviceContext, &global_offscreenBuffer,
@@ -358,7 +372,6 @@ internal void Win32DisplayOffScreenBuffer(HDC dc, Win32offScreenBuf *buffer,
 }
 
 internal void renderColors(Win32offScreenBuf buffer, int windowX, int windowY) {
-
   uint8_t *Row = (uint8_t *)buffer.memory;
   uint32_t *Pixel;
   for (int pixelY = 0; pixelY < buffer.height; ++pixelY) {
@@ -366,7 +379,6 @@ internal void renderColors(Win32offScreenBuf buffer, int windowX, int windowY) {
     for (int pixelX = 0; pixelX < buffer.width; ++pixelX) {
       uint8_t Green = pixelX + windowX;
       uint8_t Blue = pixelY + windowY;
-      //      uint8_t Red = pixelY + windowX;
       *Pixel++ = (Green << 8) | Blue;
     }
     Row += buffer.pitch;
