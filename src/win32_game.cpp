@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cstdio>
 #include <math.h>
 #include <stdint.h>
 #include <windows.h>
@@ -7,14 +8,31 @@
 #define internal static
 #define local_persist static
 #define global static
+typedef int32_t bool32;
 
-// TODO:
-// 1. separate code and definitions into header/separate files (only main func
-// in this file)
-//
+// INFO: AUDIO VARS
+global IXAudio2 *pXAudio2{0};
+global IXAudio2SourceVoice *source_voice{0};
+
+constexpr WORD BITSPERSSAMPLE = 16;    // 16 bits per sample.
+constexpr DWORD SAMPLESPERSEC = 44100; // 44,100 samples per second.
+// 220 cycles per second (frequency of the audible tone).
+constexpr double CYCLESPERSEC = 174.0;
+constexpr double VOLUME = 0.05;
+constexpr DWORD FADEDURATION = 500;
+constexpr WORD AUDIOBUFFERSIZEINCYCLES = 10; // 10 cycles per audio buffer.
+constexpr double PI = 3.14159265358979323846;
+
+// Calculated constants.
+constexpr DWORD SAMPLESPERCYCLE =
+    (DWORD)(SAMPLESPERSEC / CYCLESPERSEC); // 200 samples per cycle.
+constexpr DWORD AUDIOBUFFERSIZEINSAMPLES =
+    SAMPLESPERCYCLE * AUDIOBUFFERSIZEINCYCLES; // 2,000 samples per buffer.
+constexpr UINT32 AUDIOBUFFERSIZEINBYTES =
+    AUDIOBUFFERSIZEINSAMPLES * BITSPERSSAMPLE / 8; // 4,000 bytes per buffer.
+// end audio vars
 
 global bool global_running;
-typedef int32_t bool32;
 struct Win32offScreenBuf {
   BITMAPINFO info;
   void *memory;
@@ -23,12 +41,14 @@ struct Win32offScreenBuf {
   int bytesPerPixel;
   int pitch;
 };
+
 global Win32offScreenBuf global_offscreenBuffer;
 
 struct winDimensions {
   int width;
   int height;
 };
+
 internal winDimensions Win32getWindowDimensions(HWND window) {
   winDimensions result;
   RECT clientRect;
@@ -43,10 +63,8 @@ typedef DWORD(WINAPI *XINPUT_GET_STATE_def)(DWORD dwUserIndex,
                                             XINPUT_STATE *pState);
 global XINPUT_GET_STATE_def XinputGetState;
 
-internal int init_test_xaudio2() {
-  // INFO: load and create instance of xaduio2
-
-  IXAudio2 *pXAudio2 = {0};
+internal int init_xaudio2() {
+  // INFO: load and create instance of xaduio2 sound engine
   HMODULE hXAudio2 = LoadLibrary("xaudio2_9.dll");
   if (!hXAudio2) {
     OutputDebugStringA("Failed to load xaudio2_9.dll");
@@ -69,91 +87,6 @@ internal int init_test_xaudio2() {
   }
 
   OutputDebugStringA("Successfully created XAduio2 engine!");
-  // TODO:
-  //   1. populate a WAVEFORMATEX structure and an XAUDIO2_BUFFER structure
-  //   2. create source and master voice
-  //   3. submit audio buffer to source voice
-  //   4. call start function
-
-  // INFO: vars needed
-  constexpr WORD BITSPERSSAMPLE = 16;    // 16 bits per sample.
-  constexpr DWORD SAMPLESPERSEC = 44100; // 44,100 samples per second.
-  // 220 cycles per second (frequency of the audible tone).
-  constexpr double CYCLESPERSEC = 174.0;
-  constexpr double VOLUME = 0.05;
-  constexpr DWORD FADEDURATION = 500;
-  constexpr WORD AUDIOBUFFERSIZEINCYCLES = 10; // 10 cycles per audio buffer.
-  constexpr double PI = 3.14159265358979323846;
-
-  // Calculated constants.
-  constexpr DWORD SAMPLESPERCYCLE =
-      (DWORD)(SAMPLESPERSEC / CYCLESPERSEC); // 200 samples per cycle.
-  constexpr DWORD AUDIOBUFFERSIZEINSAMPLES =
-      SAMPLESPERCYCLE * AUDIOBUFFERSIZEINCYCLES; // 2,000 samples per buffer.
-  constexpr UINT32 AUDIOBUFFERSIZEINBYTES =
-      AUDIOBUFFERSIZEINSAMPLES * BITSPERSSAMPLE / 8; // 4,000 bytes per buffer.
-
-  // audio buffer
-  byte main_audio[AUDIOBUFFERSIZEINBYTES] = {};
-
-  // create master voice
-  IXAudio2MasteringVoice *master_voice;
-  pXAudio2->CreateMasteringVoice(&master_voice);
-
-  // define the audio settings/format
-  WAVEFORMATEX waveformatex_struct;
-  waveformatex_struct.wFormatTag = WAVE_FORMAT_PCM;
-  waveformatex_struct.nChannels = 1;
-  waveformatex_struct.nSamplesPerSec = SAMPLESPERSEC;
-  waveformatex_struct.nBlockAlign =
-      waveformatex_struct.nChannels * BITSPERSSAMPLE / 8;
-  waveformatex_struct.nAvgBytesPerSec =
-      waveformatex_struct.nSamplesPerSec * waveformatex_struct.nBlockAlign;
-  waveformatex_struct.wBitsPerSample = BITSPERSSAMPLE;
-  waveformatex_struct.cbSize = 0;
-
-  // create source voice
-  IXAudio2SourceVoice *source_voice;
-  pXAudio2->CreateSourceVoice(&source_voice, &waveformatex_struct);
-
-  // TODO: go back over this code understand why you do all of this
-  // fill the audio buffer
-  double phase{};
-  uint32_t bufferidx{};
-  uint32_t sampleidx{};
-  while (bufferidx < AUDIOBUFFERSIZEINBYTES) {
-    double amplitude = VOLUME;
-    phase += (2 * PI) / SAMPLESPERCYCLE;
-    if (phase >= 2 * PI)
-      phase -= 2 * PI;
-    // Apply fade-in and fade-out
-    if (sampleidx < FADEDURATION) {
-      amplitude *= (double)sampleidx / FADEDURATION;
-    } else if (sampleidx > AUDIOBUFFERSIZEINSAMPLES - FADEDURATION) {
-      amplitude *=
-          (double)(AUDIOBUFFERSIZEINSAMPLES - sampleidx) / FADEDURATION;
-    }
-    int16_t sample = (int16_t)(sin(phase) * INT16_MAX * VOLUME);
-
-    // writing values in little endian
-    main_audio[bufferidx++] = (byte)sample;
-    main_audio[bufferidx++] = (byte)(sample >> 8);
-    ++sampleidx;
-  }
-  // filling out the xaudio2_buffer
-  XAUDIO2_BUFFER xaudio2_buffer = {};
-  xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
-  xaudio2_buffer.AudioBytes = AUDIOBUFFERSIZEINBYTES;
-  xaudio2_buffer.pAudioData = main_audio;
-  xaudio2_buffer.PlayBegin = 0;
-  xaudio2_buffer.PlayLength = 0;
-  xaudio2_buffer.LoopBegin = 0;
-  xaudio2_buffer.LoopLength = 0;
-  xaudio2_buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
-
-  // submit and play the buffer
-  source_voice->SubmitSourceBuffer(&xaudio2_buffer);
-  source_voice->Start(0);
 
   return 0;
 }
@@ -170,10 +103,38 @@ internal void LoadNeededWin32Libs() {
   }
 }
 
+VOID fill_audio_buffer(byte *main_audio) {
+  double phase{};
+  uint32_t bufferidx{};
+
+  while (bufferidx < AUDIOBUFFERSIZEINBYTES) {
+    phase += (2.0 * PI) / SAMPLESPERCYCLE;
+    int16_t sample = (int16_t)(sin(phase) * INT16_MAX * VOLUME);
+
+    // writing values in little endian
+    main_audio[bufferidx++] = (byte)sample;
+    main_audio[bufferidx++] = (byte)(sample >> 8);
+  }
+}
+
+DWORD WINAPI AudioThreadProc(LPVOID lParam) {
+  // TODO: Audio Test
+  //   1. populate a WAVEFORMATEX structure and an XAUDIO2_BUFFER
+  //   structure
+  //   2. create source and master voice
+  //   3. submit audio buffer to source voice
+  //   4. call start function
+
+  return 0;
+}
+
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
 internal void renderColors(Win32offScreenBuf buffer, int WindowX, int WindowY);
+
 internal void Win32resizeDibSect(Win32offScreenBuf *buffer, int width,
                                  int height);
+
 internal void Win32DisplayOffScreenBuffer(HDC dc, Win32offScreenBuf *buffer,
                                           int x, int y, int width, int height);
 
@@ -182,8 +143,6 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
   const char CLASS_NAME[] = "HandmadeWndClass";
 
   WNDCLASS wc = {};
-
-  Win32resizeDibSect(&global_offscreenBuffer, 1280, 720);
 
   wc.style = CS_VREDRAW | CS_HREDRAW;
   wc.lpfnWndProc = WindowProc;
@@ -199,9 +158,46 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
       global_running = true;
       double x = 0, y = 0;
 
-      init_test_xaudio2();
+      winDimensions dimensions = Win32getWindowDimensions(windHandle);
+      Win32resizeDibSect(&global_offscreenBuffer, dimensions.width,
+                         dimensions.height);
 
       LoadNeededWin32Libs();
+
+      // INFO: audio stuff
+      init_xaudio2();
+      // create master voice
+      IXAudio2MasteringVoice *master_voice;
+      pXAudio2->CreateMasteringVoice(&master_voice);
+
+      //  define the audio settings/format
+      WAVEFORMATEX waveformatex_struct{0};
+      waveformatex_struct.wFormatTag = WAVE_FORMAT_PCM;
+      waveformatex_struct.nChannels = 2;
+      waveformatex_struct.nSamplesPerSec = SAMPLESPERSEC;
+      waveformatex_struct.nBlockAlign =
+          (waveformatex_struct.nChannels * BITSPERSSAMPLE) / 8;
+      waveformatex_struct.nAvgBytesPerSec =
+          waveformatex_struct.nSamplesPerSec * waveformatex_struct.nBlockAlign;
+      waveformatex_struct.wBitsPerSample = BITSPERSSAMPLE;
+      waveformatex_struct.cbSize = 0;
+
+      // filling out the xaudio2_buffer
+      XAUDIO2_BUFFER xaudio2_buffer = {};
+      xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
+      xaudio2_buffer.AudioBytes = AUDIOBUFFERSIZEINBYTES;
+      xaudio2_buffer.PlayBegin = 0;
+      xaudio2_buffer.PlayLength = 0;
+      xaudio2_buffer.LoopBegin = 0;
+      xaudio2_buffer.LoopLength = 0;
+      xaudio2_buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
+
+      // create source voice
+      pXAudio2->CreateSourceVoice(&source_voice, &waveformatex_struct);
+
+      source_voice->Start(0);
+
+      XAUDIO2_VOICE_STATE state;
 
       while (global_running) {
         MSG msg;
@@ -212,11 +208,26 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
           TranslateMessage(&msg);
           DispatchMessage(&msg);
         }
+        if (source_voice->GetState(&state),
+            state.BuffersQueued < XAUDIO2_MAX_QUEUED_BUFFERS) {
+          // create/fill main audio buffer
+          byte main_audio[AUDIOBUFFERSIZEINBYTES] = {};
+          fill_audio_buffer(main_audio);
 
+          xaudio2_buffer.AudioBytes = AUDIOBUFFERSIZEINBYTES;
+          xaudio2_buffer.pAudioData = main_audio;
+          xaudio2_buffer.Flags = 0;
+          source_voice->SubmitSourceBuffer(&xaudio2_buffer);
+        }
+
+        winDimensions windowDimensions = Win32getWindowDimensions(windHandle);
+
+        Win32resizeDibSect(&global_offscreenBuffer, windowDimensions.width,
+                           windowDimensions.height);
         // Drawing to Window
         renderColors(global_offscreenBuffer, x, y);
         HDC deviceContext = GetDC(windHandle);
-        winDimensions windowDimensions = Win32getWindowDimensions(windHandle);
+
         Win32DisplayOffScreenBuffer(deviceContext, &global_offscreenBuffer, 0,
                                     0, windowDimensions.width,
                                     windowDimensions.height);
