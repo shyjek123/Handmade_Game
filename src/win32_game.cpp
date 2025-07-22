@@ -1,16 +1,22 @@
-#include <cassert>
-#include <cstdio>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <windows.h>
 #include <xaudio2.h>
 #include <xinput.h>
+
 #define internal static
 #define local_persist static
 #define global static
-typedef int32_t bool32;
 
-// INFO: AUDIO VARS
+typedef int32_t real32;
+
+// TODO: output cycle information:
+// frames per second
+// miliseconds per frame
+// mega cycles per frame
+//
+//  INFO: AUDIO VARS
 global IXAudio2 *pXAudio2{0};
 global IXAudio2SourceVoice *source_voice{0};
 
@@ -149,6 +155,10 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
   wc.hInstance = inst;
   wc.lpszClassName = CLASS_NAME;
 
+  LARGE_INTEGER frequency_res;
+  QueryPerformanceFrequency(&frequency_res);
+  int64_t frequency = frequency_res.QuadPart;
+
   if (RegisterClass(&wc)) {
     HWND windHandle = CreateWindowEx(
         0, wc.lpszClassName, "Handmade Hero", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
@@ -199,6 +209,10 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
 
       XAUDIO2_VOICE_STATE state;
 
+      // Performance Counting
+      LARGE_INTEGER last_counter;
+      QueryPerformanceCounter(&last_counter);
+      uint64_t last_cpu_clock = __rdtsc();
       while (global_running) {
         MSG msg;
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE) > 0) {
@@ -219,20 +233,6 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
           xaudio2_buffer.Flags = 0;
           source_voice->SubmitSourceBuffer(&xaudio2_buffer);
         }
-
-        winDimensions windowDimensions = Win32getWindowDimensions(windHandle);
-
-        Win32resizeDibSect(&global_offscreenBuffer, windowDimensions.width,
-                           windowDimensions.height);
-        // Drawing to Window
-        renderColors(global_offscreenBuffer, x, y);
-        HDC deviceContext = GetDC(windHandle);
-
-        Win32DisplayOffScreenBuffer(deviceContext, &global_offscreenBuffer, 0,
-                                    0, windowDimensions.width,
-                                    windowDimensions.height);
-        ReleaseDC(windHandle, deviceContext);
-
         // Gamepad input handling
         for (DWORD controllerIndex = 0; controllerIndex < XUSER_MAX_COUNT;
              controllerIndex++) {
@@ -253,6 +253,41 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
         }
 
         x += 0.5;
+
+        winDimensions windowDimensions = Win32getWindowDimensions(windHandle);
+
+        Win32resizeDibSect(&global_offscreenBuffer, windowDimensions.width,
+                           windowDimensions.height);
+        // Drawing to Window
+        renderColors(global_offscreenBuffer, x, y);
+        HDC deviceContext = GetDC(windHandle);
+
+        Win32DisplayOffScreenBuffer(deviceContext, &global_offscreenBuffer, 0,
+                                    0, windowDimensions.width,
+                                    windowDimensions.height);
+        ReleaseDC(windHandle, deviceContext);
+
+        // calc performance stats
+        uint64_t end_cpu_clock = __rdtsc();
+
+        LARGE_INTEGER end_counter;
+        QueryPerformanceCounter(&end_counter);
+
+        uint64_t cycles_elapsed = end_cpu_clock - last_cpu_clock;
+        int64_t counter_elapsed = end_counter.QuadPart - last_counter.QuadPart;
+
+        double ms_per_frame =
+            (((1000.0f * (double)counter_elapsed) / (double)frequency));
+        double fps = ((double)frequency / (double)counter_elapsed);
+        double mega_cycles_per_second =
+            ((double)cycles_elapsed / (1000.0f * 1000.0f));
+
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), "%.02fms/f %.02ff/s %.02fMS/s\n",
+                 ms_per_frame, fps, mega_cycles_per_second);
+        OutputDebugString(buffer);
+        last_counter = end_counter;
+        last_cpu_clock = end_cpu_clock;
       }
 
     } else {
