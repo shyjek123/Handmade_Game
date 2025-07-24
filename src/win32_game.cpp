@@ -50,21 +50,21 @@ typedef DWORD(WINAPI *XINPUT_GET_STATE_def)(DWORD dwUserIndex,
                                             XINPUT_STATE *pState);
 global XINPUT_GET_STATE_def XinputGetState;
 
-LRESULT CALLBACK win32_window_proc(HWND hwnd, UINT uMsg, WPARAM wParam,
+LRESULT CALLBACK win32_Window_Proc(HWND hwnd, UINT uMsg, WPARAM wParam,
                                    LPARAM lParam);
 
-internal screen_dimensions Win32getWindowDimensions(HWND window);
+internal screen_dimensions win32_Get_Window_Dimensions(HWND window);
 
-internal void win32_resize_dib_sect(Win32offScreenBuf *buffer, int width,
+internal void win32_Resize_Dib_Sect(Win32offScreenBuf *buffer, int width,
                                     int height);
 
-internal int win32_init_xaudio2();
+internal int win32_Init_Xaudio2();
 
-internal void win32_load_libs();
+internal void win32_Load_Libs();
 
-internal void fill_audio_buffer(byte *main_audio);
+internal void Fill_Audio_Buffer(byte *main_audio);
 
-internal void win32_display_offscreen_buffer(HDC dc, Win32offScreenBuf *buffer,
+internal void win32_Display_Offscreen_Buffer(HDC dc, Win32offScreenBuf *buffer,
                                              int x, int y, int width,
                                              int height);
 
@@ -75,7 +75,7 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
   WNDCLASS wc = {};
 
   wc.style = CS_VREDRAW | CS_HREDRAW;
-  wc.lpfnWndProc = win32_window_proc;
+  wc.lpfnWndProc = win32_Window_Proc;
   wc.hInstance = inst;
   wc.lpszClassName = CLASS_NAME;
 
@@ -92,14 +92,14 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
       global_running = true;
       double x = 0, y = 0;
 
-      screen_dimensions dimensions = Win32getWindowDimensions(windHandle);
-      win32_resize_dib_sect(&global_offscreenBuffer, dimensions.width,
+      screen_dimensions dimensions = win32_Get_Window_Dimensions(windHandle);
+      win32_Resize_Dib_Sect(&global_offscreenBuffer, dimensions.width,
                             dimensions.height);
 
-      win32_load_libs();
+      win32_Load_Libs();
 
       // INFO: audio stuff
-      win32_init_xaudio2();
+      win32_Init_Xaudio2();
       // create master voice
       IXAudio2MasteringVoice *master_voice;
       pXAudio2->CreateMasteringVoice(&master_voice);
@@ -150,7 +150,7 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
             state.BuffersQueued < XAUDIO2_MAX_QUEUED_BUFFERS) {
           // create/fill main audio buffer
           byte main_audio[AUDIOBUFFERSIZEINBYTES] = {};
-          fill_audio_buffer(main_audio);
+          Fill_Audio_Buffer(main_audio);
 
           xaudio2_buffer.AudioBytes = AUDIOBUFFERSIZEINBYTES;
           xaudio2_buffer.pAudioData = main_audio;
@@ -179,9 +179,9 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
         x += 0.5;
 
         screen_dimensions windowDimensions =
-            Win32getWindowDimensions(windHandle);
+            win32_Get_Window_Dimensions(windHandle);
 
-        win32_resize_dib_sect(&global_offscreenBuffer, windowDimensions.width,
+        win32_Resize_Dib_Sect(&global_offscreenBuffer, windowDimensions.width,
                               windowDimensions.height);
 
         game_offscreen_buffer game_offscreen_buffer{};
@@ -196,7 +196,7 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
 
         HDC deviceContext = GetDC(windHandle);
 
-        win32_display_offscreen_buffer(deviceContext, &global_offscreenBuffer,
+        win32_Display_Offscreen_Buffer(deviceContext, &global_offscreenBuffer,
                                        0, 0, windowDimensions.width,
                                        windowDimensions.height);
         ReleaseDC(windHandle, deviceContext);
@@ -217,7 +217,7 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
             ((double)cycles_elapsed / (1000.0f * 1000.0f));
 
         char buffer[256];
-        snprintf(buffer, sizeof(buffer), "%.02fms/f %.02ff/s %.02fMS/s\n",
+        snprintf(buffer, sizeof(buffer), "%.02fms/f %.02ff/s %.02fmc/s\n",
                  ms_per_frame, fps, mega_cycles_per_second);
         // OutputDebugString(buffer);
         last_counter = end_counter;
@@ -234,7 +234,7 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
   return 0;
 }
 
-LRESULT CALLBACK win32_window_proc(HWND hwnd, UINT msg, WPARAM wParam,
+LRESULT CALLBACK win32_Window_Proc(HWND hwnd, UINT msg, WPARAM wParam,
                                    LPARAM lParam) {
   LRESULT result = 0;
   switch (msg) {
@@ -305,8 +305,8 @@ LRESULT CALLBACK win32_window_proc(HWND hwnd, UINT msg, WPARAM wParam,
     // int width = ps.rcPaint.right - ps.rcPaint.left;
     // int height = ps.rcPaint.bottom - ps.rcPaint.top;
 
-    screen_dimensions windowDimensions = Win32getWindowDimensions(hwnd);
-    win32_display_offscreen_buffer(
+    screen_dimensions windowDimensions = win32_Get_Window_Dimensions(hwnd);
+    win32_Display_Offscreen_Buffer(
         deviceContext, &global_offscreenBuffer, upperLeftX, upperLeftY,
         windowDimensions.width, windowDimensions.height);
     EndPaint(hwnd, &ps);
@@ -318,7 +318,7 @@ LRESULT CALLBACK win32_window_proc(HWND hwnd, UINT msg, WPARAM wParam,
   return result;
 }
 
-internal void win32_resize_dib_sect(Win32offScreenBuf *buffer, int width,
+internal void win32_Resize_Dib_Sect(Win32offScreenBuf *buffer, int width,
                                     int height) {
   if (buffer->memory) {
     VirtualFree(buffer->memory, NULL, MEM_RELEASE);
@@ -344,7 +344,7 @@ internal void win32_resize_dib_sect(Win32offScreenBuf *buffer, int width,
   buffer->pitch = buffer->width * buffer->bytesPerPixel;
 }
 
-internal void win32_display_offscreen_buffer(HDC dc, Win32offScreenBuf *buffer,
+internal void win32_Display_Offscreen_Buffer(HDC dc, Win32offScreenBuf *buffer,
                                              int x, int y, int wWidth,
                                              int wHeight) {
   // TODO: aspect ratio correction
@@ -352,7 +352,7 @@ internal void win32_display_offscreen_buffer(HDC dc, Win32offScreenBuf *buffer,
                 buffer->memory, &buffer->info, DIB_RGB_COLORS, SRCCOPY);
 }
 
-internal int win32_init_xaudio2() {
+internal int win32_Init_Xaudio2() {
   // INFO: load and create instance of xaduio2 sound engine
   HMODULE hXAudio2 = LoadLibrary("xaudio2_9.dll");
   if (!hXAudio2) {
@@ -380,7 +380,7 @@ internal int win32_init_xaudio2() {
   return 0;
 }
 
-internal void win32_load_libs() {
+internal void win32_Load_Libs() {
   HMODULE xinput_library = LoadLibraryA("xinput1_4.dll");
   if (!xinput_library)
     xinput_library = LoadLibraryA("xinput1_3.dll");
@@ -392,7 +392,7 @@ internal void win32_load_libs() {
   }
 }
 
-internal void fill_audio_buffer(byte *main_audio) {
+internal void Fill_Audio_Buffer(byte *main_audio) {
   double phase{};
   uint32_t bufferidx{};
 
@@ -406,7 +406,7 @@ internal void fill_audio_buffer(byte *main_audio) {
   }
 }
 
-internal screen_dimensions Win32getWindowDimensions(HWND window) {
+internal screen_dimensions win32_Get_Window_Dimensions(HWND window) {
   screen_dimensions result;
   RECT clientRect;
   GetClientRect(window, &clientRect);
