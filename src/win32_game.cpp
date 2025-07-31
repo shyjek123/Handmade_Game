@@ -1,4 +1,5 @@
 #include "game.cpp"
+#include <malloc.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -10,29 +11,23 @@
 #define local_persist static
 #define global static
 
+global bool global_running;
+
 //  INFO: AUDIO VARS
 global IXAudio2 *pXAudio2{0};
 global IXAudio2SourceVoice *source_voice{0};
 
-constexpr WORD BITSPERSSAMPLE = 16;    // 16 bits per sample.
-constexpr DWORD SAMPLESPERSEC = 44100; // 44,100 samples per second.
-// 220 cycles per second (frequency of the audible tone).
-constexpr double CYCLESPERSEC = 174.0;
-constexpr double VOLUME = 0.05;
-constexpr DWORD FADEDURATION = 500;
-constexpr WORD AUDIOBUFFERSIZEINCYCLES = 10; // 10 cycles per audio buffer.
 constexpr double PI = 3.14159265358979323846;
-
-// Calculated constants.
-constexpr DWORD SAMPLESPERCYCLE =
-    (DWORD)(SAMPLESPERSEC / CYCLESPERSEC); // 200 samples per cycle.
-constexpr DWORD AUDIOBUFFERSIZEINSAMPLES =
-    SAMPLESPERCYCLE * AUDIOBUFFERSIZEINCYCLES; // 2,000 samples per buffer.
-constexpr UINT32 AUDIOBUFFERSIZEINBYTES =
-    AUDIOBUFFERSIZEINSAMPLES * BITSPERSSAMPLE / 8; // 4,000 bytes per buffer.
-// end audio vars
-
-global bool global_running;
+struct win32_sound_info_struct {
+  uint16_t bitsPerSample;
+  uint32_t samplesPerSecond;
+  double toneHz;
+  double volume;
+  uint16_t sizeInCycles;
+  uint32_t samplesPerCycle;
+  uint32_t sizeInSamples;
+  uint32_t sizeInBytes;
+};
 
 struct Win32offScreenBuf {
   BITMAPINFO info;
@@ -53,16 +48,19 @@ global XINPUT_GET_STATE_def XinputGetState;
 LRESULT CALLBACK win32_Window_Proc(HWND hwnd, UINT uMsg, WPARAM wParam,
                                    LPARAM lParam);
 
-internal screen_dimensions win32_Get_Window_Dimensions(HWND window);
+internal screen_dimensions_struct win32_Get_Window_Dimensions(HWND window);
 
 internal void win32_Resize_Dib_Sect(Win32offScreenBuf *buffer, int width,
                                     int height);
 
+internal void win32_Fill_SoundBuffer(game_sound_buffer_struct *src_sound_buf,
+                                     int16_t *dst_sound_buf);
+
 internal int win32_Init_Xaudio2();
 
-internal void win32_Load_Libs();
-
 internal void Fill_Audio_Buffer(byte *main_audio);
+
+internal void win32_Load_Libs();
 
 internal void win32_Display_Offscreen_Buffer(HDC dc, Win32offScreenBuf *buffer,
                                              int x, int y, int width,
@@ -85,6 +83,7 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
 
   if (RegisterClass(&wc)) {
     HWND windHandle = CreateWindowEx(
+
         0, wc.lpszClassName, "Handmade Hero", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, inst,
         0);
@@ -92,51 +91,65 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
       global_running = true;
       double x = 0, y = 0;
 
-      screen_dimensions dimensions = win32_Get_Window_Dimensions(windHandle);
+      screen_dimensions_struct dimensions =
+          win32_Get_Window_Dimensions(windHandle);
       win32_Resize_Dib_Sect(&global_offscreenBuffer, dimensions.width,
                             dimensions.height);
 
       win32_Load_Libs();
 
       // INFO: audio stuff
-      win32_Init_Xaudio2();
-      // create master voice
-      IXAudio2MasteringVoice *master_voice;
-      pXAudio2->CreateMasteringVoice(&master_voice);
+      win32_sound_info_struct win32_sound_info = {};
+      win32_sound_info.bitsPerSample = 16;
+      win32_sound_info.samplesPerSecond = 44100;
+      win32_sound_info.toneHz = 440.0;
+      win32_sound_info.volume = 10.0;
+      win32_sound_info.sizeInCycles = 10;
+      win32_sound_info.samplesPerCycle =
+          (int)(win32_sound_info.samplesPerSecond / win32_sound_info.toneHz);
+      win32_sound_info.sizeInSamples =
+          win32_sound_info.samplesPerCycle * win32_sound_info.sizeInCycles;
+      win32_sound_info.sizeInBytes =
+          (win32_sound_info.sizeInSamples * win32_sound_info.bitsPerSample) / 8;
 
-      //  define the audio settings/format
+      win32_Init_Xaudio2();
       WAVEFORMATEX waveformatex_struct{0};
       waveformatex_struct.wFormatTag = WAVE_FORMAT_PCM;
-      waveformatex_struct.nChannels = 2;
-      waveformatex_struct.nSamplesPerSec = SAMPLESPERSEC;
+      waveformatex_struct.nChannels = 1;
+      waveformatex_struct.nSamplesPerSec = win32_sound_info.samplesPerSecond;
       waveformatex_struct.nBlockAlign =
-          (waveformatex_struct.nChannels * BITSPERSSAMPLE) / 8;
+          (waveformatex_struct.nChannels * win32_sound_info.bitsPerSample) / 8;
       waveformatex_struct.nAvgBytesPerSec =
           waveformatex_struct.nSamplesPerSec * waveformatex_struct.nBlockAlign;
-      waveformatex_struct.wBitsPerSample = BITSPERSSAMPLE;
+      waveformatex_struct.wBitsPerSample = win32_sound_info.bitsPerSample;
       waveformatex_struct.cbSize = 0;
 
       // filling out the xaudio2_buffer
       XAUDIO2_BUFFER xaudio2_buffer = {};
-      xaudio2_buffer.Flags = XAUDIO2_END_OF_STREAM;
-      xaudio2_buffer.AudioBytes = AUDIOBUFFERSIZEINBYTES;
+      xaudio2_buffer.AudioBytes = win32_sound_info.sizeInBytes;
       xaudio2_buffer.PlayBegin = 0;
       xaudio2_buffer.PlayLength = 0;
       xaudio2_buffer.LoopBegin = 0;
       xaudio2_buffer.LoopLength = 0;
       xaudio2_buffer.LoopCount = XAUDIO2_LOOP_INFINITE;
 
+      // create master voice
+      IXAudio2MasteringVoice *master_voice;
+      pXAudio2->CreateMasteringVoice(&master_voice);
+
       // create source voice
       pXAudio2->CreateSourceVoice(&source_voice, &waveformatex_struct);
 
       source_voice->Start(0);
-
       XAUDIO2_VOICE_STATE state;
+      int16_t *main_audio = (int16_t *)VirtualAlloc(
+          NULL, win32_sound_info.sizeInBytes, MEM_COMMIT, PAGE_READWRITE);
 
       // Performance Counting
       LARGE_INTEGER last_counter;
       QueryPerformanceCounter(&last_counter);
       uint64_t last_cpu_clock = __rdtsc();
+
       while (global_running) {
         MSG msg;
         while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE) > 0) {
@@ -146,17 +159,7 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
           TranslateMessage(&msg);
           DispatchMessage(&msg);
         }
-        if (source_voice->GetState(&state),
-            state.BuffersQueued < XAUDIO2_MAX_QUEUED_BUFFERS) {
-          // create/fill main audio buffer
-          byte main_audio[AUDIOBUFFERSIZEINBYTES] = {};
-          Fill_Audio_Buffer(main_audio);
 
-          xaudio2_buffer.AudioBytes = AUDIOBUFFERSIZEINBYTES;
-          xaudio2_buffer.pAudioData = main_audio;
-          xaudio2_buffer.Flags = 0;
-          source_voice->SubmitSourceBuffer(&xaudio2_buffer);
-        }
         // Gamepad input handling
         for (DWORD controllerIndex = 0; controllerIndex < XUSER_MAX_COUNT;
              controllerIndex++) {
@@ -178,13 +181,13 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
 
         x += 0.5;
 
-        screen_dimensions windowDimensions =
+        screen_dimensions_struct windowDimensions =
             win32_Get_Window_Dimensions(windHandle);
 
         win32_Resize_Dib_Sect(&global_offscreenBuffer, windowDimensions.width,
                               windowDimensions.height);
 
-        game_offscreen_buffer game_offscreen_buffer{};
+        game_offscreen_buffer_struct game_offscreen_buffer{};
         game_offscreen_buffer.memory = global_offscreenBuffer.memory;
         game_offscreen_buffer.height = global_offscreenBuffer.height;
         game_offscreen_buffer.width = global_offscreenBuffer.width;
@@ -192,7 +195,25 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
             global_offscreenBuffer.bytesPerPixel;
         game_offscreen_buffer.pitch = global_offscreenBuffer.pitch;
 
-        game_update_render(&game_offscreen_buffer, x, y);
+        int16_t samples[88200];
+        game_sound_buffer_struct game_sound_buffer = {};
+        game_sound_buffer.samplesPerSecond = win32_sound_info.samplesPerSecond;
+        game_sound_buffer.sampleCount = win32_sound_info.samplesPerSecond;
+        game_sound_buffer.samples = samples;
+
+        game_Update_Render(&game_offscreen_buffer, x, y, &game_sound_buffer);
+
+        if (source_voice->GetState(&state),
+            state.BuffersQueued < XAUDIO2_MAX_QUEUED_BUFFERS) {
+          win32_Fill_SoundBuffer(&game_sound_buffer, main_audio);
+
+          xaudio2_buffer.AudioBytes = 88200;
+
+          xaudio2_buffer.pAudioData = (byte *)main_audio;
+          xaudio2_buffer.Flags = 0;
+
+          source_voice->SubmitSourceBuffer(&xaudio2_buffer);
+        }
 
         HDC deviceContext = GetDC(windHandle);
 
@@ -305,7 +326,8 @@ LRESULT CALLBACK win32_Window_Proc(HWND hwnd, UINT msg, WPARAM wParam,
     // int width = ps.rcPaint.right - ps.rcPaint.left;
     // int height = ps.rcPaint.bottom - ps.rcPaint.top;
 
-    screen_dimensions windowDimensions = win32_Get_Window_Dimensions(hwnd);
+    screen_dimensions_struct windowDimensions =
+        win32_Get_Window_Dimensions(hwnd);
     win32_Display_Offscreen_Buffer(
         deviceContext, &global_offscreenBuffer, upperLeftX, upperLeftY,
         windowDimensions.width, windowDimensions.height);
@@ -392,25 +414,19 @@ internal void win32_Load_Libs() {
   }
 }
 
-internal void Fill_Audio_Buffer(byte *main_audio) {
-  double phase{};
-  uint32_t bufferidx{};
-
-  while (bufferidx < AUDIOBUFFERSIZEINBYTES) {
-    phase += (2.0 * PI) / SAMPLESPERCYCLE;
-    int16_t sample = (int16_t)(sin(phase) * INT16_MAX * VOLUME);
-
-    // writing values in little endian
-    main_audio[bufferidx++] = (byte)sample;
-    main_audio[bufferidx++] = (byte)(sample >> 8);
-  }
-}
-
-internal screen_dimensions win32_Get_Window_Dimensions(HWND window) {
-  screen_dimensions result;
+internal screen_dimensions_struct win32_Get_Window_Dimensions(HWND window) {
+  screen_dimensions_struct result;
   RECT clientRect;
   GetClientRect(window, &clientRect);
   result.width = clientRect.right - clientRect.left;
   result.height = clientRect.bottom - clientRect.top;
   return result;
+}
+
+internal void win32_Fill_SoundBuffer(game_sound_buffer_struct *src_sound_buf,
+                                     int16_t *dst_sound_buf) {
+
+  for (int idx = 0; idx < src_sound_buf->sampleCount; idx++) {
+    *dst_sound_buf++ = src_sound_buf->samples[idx];
+  }
 }
