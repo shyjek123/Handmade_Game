@@ -1,70 +1,120 @@
 #include "game.h"
+/* TODO: reiimplement game, to work linux native*/
 
-internal void game_Render_Colors(game_state_struct *game_state,
-                                 game_offscreen_buffer_struct *buffer) {
-  uint8_t *Row = (uint8_t *)buffer->memory;
-  uint32_t *Pixel;
-  for (int pixelY = 0; pixelY < buffer->height; ++pixelY) {
-    Pixel = (uint32_t *)Row;
-    for (int pixelX = 0; pixelX < buffer->width; ++pixelX) {
-      uint8_t Green = (uint8_t)(pixelX + game_state->x);
-      uint8_t Blue = (uint8_t)(pixelY + game_state->y);
-      *Pixel++ = (Green << 8) | Blue;
+#define internal static
+#define local_persist static
+#define global static
+
+global bool global_running;
+// TODO: *source_voice{0}
+
+int main() {
+    Display* display = XOpenDisplay(NULL);
+    if (display == NULL) {
+        fprintf(stderr, "Unable to open X display\n");
+        return 1;
     }
-    Row += buffer->pitch;
-  }
-}
 
-internal void game_Sound_Out(game_state_struct *game_state,
-                             game_sound_buffer_struct *sound) {
+    int screen = DefaultScreen(display);
+    Window root = RootWindow(display, screen);
 
-  local_persist double phase{};
+    int x = 100, y = 100;
+    unsigned int width = 800, height = 600;
+    unsigned int border_width = 0;
 
-  int16_t *bufferOut = sound->samples;
-  double phaseIncrement =
-      (2.0 * 3.14159265358979323846 * 1.0f /
-       (sound->samplesPerSecond / (float)game_state->tonehz));
+    XSetWindowAttributes attributes = {};
+    attributes.background_pixel = 0xFFFFFF;//BG color
+    attributes.event_mask = ExposureMask | KeyPressMask | StructureNotifyMask; //input events to respond to
 
-  for (int bufferIndex = 0; bufferIndex < sound->sampleCount; ++bufferIndex) {
-    double sineVal = sin(phase);
-    int16_t sampleVal = (int16_t)(sineVal * game_state->toneVol);
+    unsigned long valuemask = CWBackPixel | CWEventMask;
+    Window window = XCreateWindow(
+        display,                    // The display pointer
+        root,                       // Parent window (the desktop root)
+        x, y,                       // Coordinates
+        width, height,              // Sizes
+        border_width,               // Border width
+        CopyFromParent,             // Depth
+        InputOutput,                // Window class
+        CopyFromParent,             // Visual type
+        valuemask,                  // Attribute mask
+        &attributes                 // Pointer to the attribute structure
+    );
+  //TODO: add frequency_res, queryperffreq, define frequency
 
-    *bufferOut++ = sampleVal;
-    *bufferOut++ = sampleVal;
+  if (window){
+    Atom wmDeleteWindow = XInternAtom(display, "WM_DELETE_WINDOW", False);
+    XSetWMProtocols(display, window, &wmDeleteWindow, 1);
 
-    phase += phaseIncrement;
-    if (phase > (2.0 * 3.14159265358979323846))
-      phase -= (2.0 * 3.14159265358979323846);
-  }
-}
+    XMapWindow(display, window);
+    XFlush(display);
 
-internal void game_Update_Render(game_memory_struct *game_memory,
-                                 game_offscreen_buffer_struct *buffer,
-                                 game_sound_buffer_struct *sound) {
+    global_running = true;
+    /*TODO: 
+      get window dimensions
+      resize dib section
+      load needed libraries, if needed
 
-  game_state_struct *game_state = (game_state_struct *)game_memory->permanent;
+      TODO: setup sound structs and info
+      TODO: setup memory, virtualalloc that mem, performance counting(last_counter, Query it, last cpu clock)
+      only continue if audio, memory, ram all true 
+      init game input
 
-  assert(sizeof(game_state) <= game_memory->permanentSize);
+#if HANDMADE_DEV
+      LPVOID base_address = (LPVOID)terabytes((uint64_t)2);
+#else
+      LPVOID base_address = 0;
+#endif
+ 
+    */
 
-  if (!game_memory->isInitialized) {
-    game_memory->isInitialized = true;
-    game_state->x = 0;
-    game_state->y = 0;
-    game_state->tonehz = 256;
-    game_state->toneVol = 30000;
+    XEvent event;
 
-    // NOTE: testing file IO
-    debug_win32_fileIO_struct file_info =
-        debug_win32_ReadFile((char *)__FILE__);
-    if (file_info.data) {
-      debug_win32_WriteFile(
-          (char *)"C:\\Users\\sebas\\source\\projects\\Handmade_"
-                  "Hero\\data\\test."
-                  "txt",
-          file_info.size, file_info.data);
+    while (global_running) {
+        XNextEvent(display, &event);
+
+        switch (event.type) {
+            case Expose:
+                // Window needs a redraw (triggered on creation/uncovering)
+                break;
+
+            case KeyPress: {
+                // Check if the user pressed the Escape key to close the window
+                // TODO: add KeyPress Handler function
+                KeySym keysym = XLookupKeysym(&event.xkey, 0);
+                if (keysym == XK_Escape) {
+                    global_running = false;
+                }
+                break;
+            }
+
+            case ClientMessage:
+                // Close the window if the user clicked the Window Manager close button
+                if ((Atom)event.xclient.data.l[0] == wmDeleteWindow) {
+                    global_running = false;
+                }
+                break;
+
+            default:
+                break;
+        }
+      //TODO: need to implement linux versions of this
+        screen_dimensions_struct window_dimensions = get_window_dimensions(window);
+
+        resize_window(&global_offscreenBuffer, windowDimensions.width,
+                              windowDimensions.height);
+
+        offscreen_buffer_struct offscreen_buffer{};
+        offscreen_buffer.memory = global_offscreenBuffer.memory;
+        offscreen_buffer.height = global_offscreenBuffer.height;
+        offscreen_buffer.width = global_offscreenBuffer.width;
+        offscreen_buffer.bytesPerPixel =
+            global_offscreenBuffer.bytesPerPixel;
+        offscreen_buffer.pitch = global_offscreenBuffer.pitch;
+
     }
-  }
 
-  game_Sound_Out(game_state, sound);
-  game_Render_Colors(game_state, buffer);
+    XDestroyWindow(display, window);
+    XCloseDisplay(display);
+  }
+  return 0;
 }
