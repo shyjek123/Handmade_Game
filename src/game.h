@@ -1,90 +1,119 @@
-/*TODO: add libraries so far, linux equivalents
-  malloc.h
-  math.h
-  stdint.h
-  OS native stuff lib
-  audo input lib
-  input library
-*/
-#include <X11/Xlib.h>
-#include <X11/Xutil.h>
-#include <stdio.h>
-#include <stdlib.h>
+#if !defined(HANDMADE_H)
+#include <math.h>
+#include <stdint.h>
 
-struct offscreen_buffer{
-  void* memory;
+#define internal static
+#define local_persist static
+#define global static
+
+#define kilobytes(amount) ((amount) * 1024)
+#define megabytes(amount) (kilobytes(amount) * 1024)
+#define gigabytes(amount) (megabytes(amount) * 1024)
+#define terabytes(amount) (megabytes(amount) * 1024)
+
+#define arraycount(arr) (sizeof(arr) / sizeof((arr)[0]))
+
+#if HANDMADE_LINT
+#define assert(exp)                                                            \
+  if (!(exp)) {                                                                \
+    *(int *)0 = 0;                                                             \
+  }
+#else
+#define assert(exp)
+#endif
+
+inline uint32_t safe_uint64_truncate(uint64_t num) {
+  assert(num <= 0xFFFFFFFF);
+  return (uint32_t)num;
+}
+
+#if 1
+// NOTE: not for final game, does block and does not protect against data loss
+
+struct debug_win32_fileIO_struct {
+  uint32_t size;
+  void *data;
+};
+
+internal debug_win32_fileIO_struct debug_win32_ReadFile(char *filename);
+internal bool debug_win32_WriteFile(char *filename, uint32_t size,
+                                    void *memory);
+internal void debug_win32_FreeFile(void *memory);
+
+#endif
+
+struct game_offscreen_buffer_struct {
+  void *memory;
   int width;
   int height;
   int bytesPerPixel;
   int pitch;
 };
-global offscreen_buffer global_offscreenbuffer;
-struct screen_dimensions_struct {
-  int width;
-  int height;
+struct game_sound_buffer_struct {
+  int16_t *samples;
+  int sampleCount;
+  int samplesPerSecond;
+};
+struct game_state_struct {
+  double x;
+  double y;
+
+  int tonehz;
+  int16_t toneVol;
+};
+struct game_memory_struct {
+  bool isInitialized;
+
+  void *permanent;
+  uint64_t permanentSize;
+
+  void *ram;
+  uint64_t ramSize;
 };
 
-//put a window handle in and get the window dimensions back
-internal screen_dimensions_struct get_window_dimensions();
+struct game_button_state_struct {
+  int half_transition_count;
+  bool ended_down;
+};
+struct game_controller_struct {
+  bool is_analog;
 
-//resize the window
-internal void resize_window();
+  int minX;
+  int minY;
 
-//display buffer to the window
-internal void display_offscreenbuffer();
+  int maxX;
+  int maxY;
 
+  int startX;
+  int endX;
 
-//constexpr double PI = 3.14159265358979323846;
-// struct win32_sound_info_struct {
-//   uint16_t bitsPerSample;
-//   uint32_t samplesPerSecond;
-//   double toneHz;
-//   double volume;
-//   uint16_t sizeInCycles;
-//   uint32_t samplesPerCycle;
-//   uint32_t sizeInSamples;
-//   uint32_t sizeInBytes;
-// };
-//
-// struct Win32offScreenBuf {
-//   BITMAPINFO info;
-//   void *memory;
-//   int width;
-//   int height;
-//   int bytesPerPixel;
-//   int pitch;
-// };
-// global Win32offScreenBuf global_offscreenBuffer;
-// struct screen_dimensions_struct {
-//   int width;
-//   int height;
-// };
-//
-// typedef HRESULT(WINAPI *XAUDIO2CREATE_def)(IXAudio2 **ppXAudio2, UINT32 Flags,
-//                                            XAUDIO2_PROCESSOR XAudio2Processor);
-// typedef DWORD(WINAPI *XINPUT_GET_STATE_def)(DWORD dwUserIndex,
-//                                             XINPUT_STATE *pState);
-// global XINPUT_GET_STATE_def XinputGetState;
-//
-// LRESULT CALLBACK win32_Window_Proc(HWND hwnd, UINT uMsg, WPARAM wParam,
-//                                    LPARAM lParam);
-//
-// internal screen_dimensions_struct win32_Get_Window_Dimensions(HWND window);
-//
-// internal void win32_Resize_Dib_Sect(Win32offScreenBuf *buffer, int width,
-//                                     int height);
-//
-// internal void win32_Fill_SoundBuffer(game_sound_buffer_struct *src_sound_buf,
-//                                      int16_t *dst_sound_buf);
-//
-// internal int win32_Init_Xaudio2();
-//
-// internal void win32_Load_Libs();
-//
-// internal void win32_Display_Offscreen_Buffer(HDC dc, Win32offScreenBuf *buffer,
-//                                              int x, int y, int width,
-//                                              int height);
-//
-// internal void win32_Handle_Key_Input(game_button_state_struct *new_key_state,
-//                                      bool key_state);
+  int startY;
+  int endY;
 
+  union {
+    game_button_state_struct buttons[6];
+    struct {
+      game_button_state_struct up;
+      game_button_state_struct down;
+      game_button_state_struct left;
+      game_button_state_struct right;
+      game_button_state_struct l_shoulder;
+      game_button_state_struct r_shoulder;
+    };
+  };
+};
+struct game_input_struct {
+  game_controller_struct controllers[4];
+};
+
+internal void game_Render_Colors(game_state_struct *game_state,
+                                 game_offscreen_buffer_struct buffer);
+
+internal void game_Sound_Out(game_state_struct *game_state,
+                             game_sound_buffer_struct *sound);
+
+internal void game_Update_Render(game_state_struct *game_memory,
+                                 game_offscreen_buffer_struct *buffer,
+                                 game_sound_buffer_struct *sound);
+#define HANDMADE_H
+#endif
