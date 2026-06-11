@@ -1,0 +1,21 @@
+#!/bin/bash
+
+mkdir -p ./build
+
+cd ./build || exit 1
+
+g++ \
+-ggdb3 \
+-Wall -Wextra -Werror \
+-fno-rtti \
+-O0 \
+-DHANDMADE_DEV=1 \
+-DHANDMADE_LINT=1 \
+-DHANDMADE_WIN32=1 \
+../src/linux.cpp \
+-lX11 \
+-o game
+
+
+cd ..
+

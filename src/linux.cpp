@@ -12,7 +12,7 @@
  *    7. have the screen move and sound buffer output sound according to keyboard and controller input
  */
 
-struct linux_offscreen_buffer{
+struct linux_offscreen_buffer_struct{
   XImage *image;
   void *memory;
   int width;
@@ -21,7 +21,7 @@ struct linux_offscreen_buffer{
   int pitch;
   size_t size;
 };
-global linux_offscreen_buffer global_offscreen_buffer;
+global linux_offscreen_buffer_struct global_offscreen_buffer;
 
 struct screen_dimensions_struct{
   int width;
@@ -29,17 +29,18 @@ struct screen_dimensions_struct{
 };
 
 internal screen_dimensions_struct linux_get_window_dimensions(Display *display, Window window);
-internal void linux_resize_image_section(Display *display, int screen, linux_offscreen_buffer *buffer, int width, int height);
+internal void linux_resize_image_section(Display *display, int screen, linux_offscreen_buffer_struct *buffer, int width, int height);
 internal void linux_display_offscreen_buffer(Display* display, Window window, GC gc, XImage *image, int x1, int y1, int x2, int y2, unsigned int width, unsigned int height );
+
+void linux_debug_print(const char* msg);
 
 global bool global_running;
 
 
 // TODO: *source_voice{0}
 
-internal void game_Render_Colors(int x, int y,
-                                 game_offscreen_buffer_struct *buffer) {
-  uint8_t *Row = (uint8_t *)buffer->memory;
+internal void game_Render_Colors(int x, int y,XImage *buffer) {
+  uint8_t *Row = (uint8_t *)buffer->data;
   uint32_t *Pixel;
   for (int pixelY = 0; pixelY < buffer->height; ++pixelY) {
     Pixel = (uint32_t *)Row;
@@ -48,7 +49,7 @@ internal void game_Render_Colors(int x, int y,
       uint8_t Blue = (uint8_t)(pixelY + y);
       *Pixel++ = (Green << 8) | Blue;
     }
-    Row += buffer->pitch;
+    Row += buffer->bytes_per_line;
   }
 }
 
@@ -170,7 +171,6 @@ int main() {
             global_offscreen_buffer.bytes_per_pixel;
         game_offscreen_buffer.pitch = global_offscreen_buffer.pitch;
 
-      game_Render_Colors(0,0,&game_offscreen_buffer);
 
       GC gc = XCreateGC(display, window, 0, NULL);
       linux_display_offscreen_buffer(display, window, gc, global_offscreen_buffer.image, 0, 0, 0, 0, game_offscreen_buffer.width, game_offscreen_buffer.height);
@@ -179,6 +179,11 @@ int main() {
 
       /*TODO: performance logging */
 
+    }
+
+    if(global_offscreen_buffer.image){
+      global_offscreen_buffer.image->data = NULL;
+      XDestroyImage(global_offscreen_buffer.image);
     }
 
     XDestroyWindow(display, window);
@@ -203,16 +208,11 @@ internal screen_dimensions_struct linux_get_window_dimensions(Display *display, 
   return result;
 }
 
-internal void linux_resize_image_section(Display *display, int screen, linux_offscreen_buffer *buffer, int width, int height){
-  if(buffer->memory){
-    if (munmap(buffer->memory, buffer->size) == -1) {
-        perror("munmap");
-        exit(1);
-    }
-  }
+internal void linux_resize_image_section(Display *display, int screen, linux_offscreen_buffer_struct *buffer, int width, int height){
 
-  if(buffer->image){
-    XDestroyImage(buffer->image);
+
+  if(buffer->memory){
+    munmap(buffer->memory, buffer->size);
   }
 
   buffer->width = width;
@@ -228,11 +228,17 @@ internal void linux_resize_image_section(Display *display, int screen, linux_off
     exit(1);
   }
 
-  buffer->image = XCreateImage(display, DefaultVisual(display, screen), DefaultDepth(display, screen), ZPixmap, 0, (char *)buffer->memory, width, height, 32, buffer->pitch);
-
+  if(!buffer->image){
+    buffer->image = XCreateImage(display, DefaultVisual(display, screen), DefaultDepth(display, screen), ZPixmap, 0, (char *)buffer->memory, width, height, 32, buffer->pitch);
+  }else{
+    buffer->image->data = (char *)buffer->memory;
+  }
 }
 
 internal void linux_display_offscreen_buffer(Display* display, Window window, GC gc, XImage *image, int x1, int y1, int x2, int y2, unsigned int width, unsigned int height ){
+
+  game_Render_Colors(0, 0, image);
+
   XPutImage(
       display,
       window,
@@ -242,4 +248,9 @@ internal void linux_display_offscreen_buffer(Display* display, Window window, GC
       x2, y2,
       width,
       height);
+}
+
+void linux_debug_print(const char* msg) {
+    fprintf(stderr, "[DEBUG] %s\n", msg);
+    fflush(stderr); // Force it to print immediately
 }
