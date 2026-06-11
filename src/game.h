@@ -1,6 +1,12 @@
 #if !defined(HANDMADE_H)
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <cstdio>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <X11/Xutil.h>
+#include <stdlib.h>
 
 #define internal static
 #define local_persist static
@@ -29,24 +35,24 @@ inline uint32_t safe_uint64_truncate(uint64_t num) {
 
 #if 1
 // NOTE: not for final game, does block and does not protect against data loss
-
-struct debug_win32_fileIO_struct {
-  uint32_t size;
-  void *data;
-};
-
-internal debug_win32_fileIO_struct debug_win32_ReadFile(char *filename);
-internal bool debug_win32_WriteFile(char *filename, uint32_t size,
-                                    void *memory);
-internal void debug_win32_FreeFile(void *memory);
-
+//
+// struct debug_win32_fileIO_struct {
+//   uint32_t size;
+//   void *data;
+// };
+//
+// internal debug_win32_fileIO_struct debug_win32_ReadFile(char *filename);
+// internal bool debug_win32_WriteFile(char *filename, uint32_t size,
+//                                     void *memory);
+// internal void debug_win32_FreeFile(void *memory);
+//
 #endif
 
 struct game_offscreen_buffer_struct {
   void *memory;
   int width;
   int height;
-  int bytesPerPixel;
+  int bytes_per_pixel;
   int pitch;
 };
 struct game_sound_buffer_struct {
@@ -106,14 +112,14 @@ struct game_input_struct {
   game_controller_struct controllers[4];
 };
 
-internal void game_Render_Colors(game_state_struct *game_state,
-                                 game_offscreen_buffer_struct buffer);
-
-internal void game_Sound_Out(game_state_struct *game_state,
-                             game_sound_buffer_struct *sound);
-
-internal void game_Update_Render(game_state_struct *game_memory,
-                                 game_offscreen_buffer_struct *buffer,
-                                 game_sound_buffer_struct *sound);
+// internal void game_Render_Colors(game_state_struct *game_state,
+//                                  game_offscreen_buffer_struct buffer);
+//
+// internal void game_Sound_Out(game_state_struct *game_state,
+//                              game_sound_buffer_struct *sound);
+//
+// internal void game_Update_Render(game_state_struct *game_memory,
+//                                  game_offscreen_buffer_struct *buffer,
+//                                  game_sound_buffer_struct *sound);
 #define HANDMADE_H
 #endif

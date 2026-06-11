@@ -298,7 +298,7 @@ int CALLBACK WinMain(HINSTANCE inst, HINSTANCE hPrevInstance, LPSTR lpCmdLine,
                                          windowDimensions.height);
           ReleaseDC(windHandle, deviceContext);
 
-          // calc performance stats
+         // calc performance stats
           uint64_t end_cpu_clock = __rdtsc();
 
           LARGE_INTEGER end_counter;

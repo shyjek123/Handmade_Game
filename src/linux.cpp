@@ -1,5 +1,6 @@
 #include "game.h"
-#include <X11.h>
+#include <X11/Xlib.h>
+
 /* TODO: reiimplement game, to work linux native
  *  priorities: 
  *    1. blit frame buffer to the screen
@@ -16,7 +17,7 @@ struct linux_offscreen_buffer{
   void *memory;
   int width;
   int height;
-  int bytesPerPixel;
+  int bytes_per_pixel;
   int pitch;
   size_t size;
 };
@@ -27,14 +28,29 @@ struct screen_dimensions_struct{
   int height;
 };
 
-internal screen_dimensions_struct linux_get_window_dimensions(Display display, Window window);
-internal void linux_resize_image_section(linux_offscreen_buffer *buffer, int width, int height);
-internal void linux_display_offscreen_buffer();
+internal screen_dimensions_struct linux_get_window_dimensions(Display *display, Window window);
+internal void linux_resize_image_section(Display *display, int screen, linux_offscreen_buffer *buffer, int width, int height);
+internal void linux_display_offscreen_buffer(Display* display, Window window, GC gc, XImage *image, int x1, int y1, int x2, int y2, unsigned int width, unsigned int height );
 
 global bool global_running;
 
 
 // TODO: *source_voice{0}
+
+internal void game_Render_Colors(int x, int y,
+                                 game_offscreen_buffer_struct *buffer) {
+  uint8_t *Row = (uint8_t *)buffer->memory;
+  uint32_t *Pixel;
+  for (int pixelY = 0; pixelY < buffer->height; ++pixelY) {
+    Pixel = (uint32_t *)Row;
+    for (int pixelX = 0; pixelX < buffer->width; ++pixelX) {
+      uint8_t Green = (uint8_t)(pixelX + x);
+      uint8_t Blue = (uint8_t)(pixelY + y);
+      *Pixel++ = (Green << 8) | Blue;
+    }
+    Row += buffer->pitch;
+  }
+}
 
 int main() {
     Display* display = XOpenDisplay(NULL);
@@ -78,17 +94,17 @@ int main() {
     XMapWindow(display, window);
     XFlush(display);
 
-    screen_dimensions_struct dims = get_screen_dimensions(display, window);
-    resize_screen(&global_offscreen_buffer, dims.width, dims.height);
+    screen_dimensions_struct dims = linux_get_window_dimensions(display, window);
+    linux_resize_image_section(display, screen, &global_offscreen_buffer, dims.width, dims.height);
 
     /*TODO: 
       1. setup sound structs and info
     */
 
 #if HANDMADE_DEV
-        void *base_address = (void *)terabytes((uint64_t)2);
+    //void *base_address = (void *)terabytes((uint64_t)2);
 #else
-        void *base_address = 0;
+    //void *base_address = 0;
 #endif
 /*
  *TODO:
@@ -113,11 +129,12 @@ int main() {
 
             case ConfigureNotify:
               //window resize
-              int width = event.xconfigure.width;
-              int height = event.xconfigure.height;
+              width = event.xconfigure.width;
+              height = event.xconfigure.height;
 
               //update frame buffer
-              resize_offscreen_buffer(&buffer, width, height);
+              linux_resize_image_section(display, screen, &global_offscreen_buffer, width, height);
+              break;
 
             case KeyPress: {
                 // Check if the user pressed the Escape key to close the window
@@ -140,20 +157,24 @@ int main() {
                 break;
         }
 
-        screen_dimensions_struct screen_dims = get_screen_dimensions(display, window);
+        screen_dimensions_struct screen_dims = linux_get_window_dimensions(display, window);
 
-        resize_screen(&global_offscreen_buffer, screen_dims.width,
+        linux_resize_image_section(display, screen, &global_offscreen_buffer, screen_dims.width,
                               screen_dims.height);
 
-        offscreen_buffer_struct offscreen_buffer{};
-        offscreen_buffer.memory = global_offscreen_buffer.memory;
-        offscreen_buffer.height = global_offscreen_buffer.height;
-        offscreen_buffer.width = global_offscreen_buffer.width;
-        offscreen_buffer.bytesPerPixel =
-            global_offscreen_buffer.bytesPerPixel;
-        offscreen_buffer.pitch = global_offscreen_buffer.pitch;
+        game_offscreen_buffer_struct game_offscreen_buffer{};
+        game_offscreen_buffer.memory = global_offscreen_buffer.memory;
+        game_offscreen_buffer.height = global_offscreen_buffer.height;
+        game_offscreen_buffer.width = global_offscreen_buffer.width;
+        game_offscreen_buffer.bytes_per_pixel =
+            global_offscreen_buffer.bytes_per_pixel;
+        game_offscreen_buffer.pitch = global_offscreen_buffer.pitch;
 
-      display_offscreen_buffer();
+      game_Render_Colors(0,0,&game_offscreen_buffer);
+
+      GC gc = XCreateGC(display, window, 0, NULL);
+      linux_display_offscreen_buffer(display, window, gc, global_offscreen_buffer.image, 0, 0, 0, 0, game_offscreen_buffer.width, game_offscreen_buffer.height);
+      XFreeGC(display, gc);
 
 
       /*TODO: performance logging */
@@ -169,7 +190,7 @@ int main() {
 }
 
 
-internal screen_dimensions_struct linux_get_window_dimensions(Display display, Window window){
+internal screen_dimensions_struct linux_get_window_dimensions(Display *display, Window window){
   screen_dimensions_struct result;
   XWindowAttributes attrs;
   XGetWindowAttributes(display, window, &attrs);
@@ -182,34 +203,36 @@ internal screen_dimensions_struct linux_get_window_dimensions(Display display, W
   return result;
 }
 
-internal void linux_resize_image_section(offscreen_buffer* buffer, int width, int height){
+internal void linux_resize_image_section(Display *display, int screen, linux_offscreen_buffer *buffer, int width, int height){
   if(buffer->memory){
     if (munmap(buffer->memory, buffer->size) == -1) {
         perror("munmap");
-        return 1;
+        exit(1);
     }
   }
 
   if(buffer->image){
-    XDestoryImage(buffer->image);
+    XDestroyImage(buffer->image);
   }
 
-  //TODO: add XCreateImage logic and assign it to buffer->image
   buffer->width = width;
   buffer->height = height;
   buffer->bytes_per_pixel = 4;
   buffer->pitch = buffer->width * buffer->bytes_per_pixel;
   buffer->size = buffer->bytes_per_pixel * (buffer->width * buffer->height);
 
-  buffer->memory = mmap(NULL, buffer->size, PROT_READ | PROT_WRITE, MAP_PRIVATE);
+
+  buffer->memory = mmap(NULL, buffer->size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if(buffer->memory == MAP_FAILED){
     perror("mmap");
-    return 1;
+    exit(1);
   }
+
+  buffer->image = XCreateImage(display, DefaultVisual(display, screen), DefaultDepth(display, screen), ZPixmap, 0, (char *)buffer->memory, width, height, 32, buffer->pitch);
 
 }
 
-internal void display_offscreen_buffer(Display* display, Window window, GC gc, XImage *image, int x1, int y1, int x2, int y2, unsigned int width, unsigned int height ){
+internal void linux_display_offscreen_buffer(Display* display, Window window, GC gc, XImage *image, int x1, int y1, int x2, int y2, unsigned int width, unsigned int height ){
   XPutImage(
       display,
       window,
