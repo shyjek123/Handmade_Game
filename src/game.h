@@ -81,6 +81,7 @@ struct game_button_state_struct {
   int half_transition_count;
   bool ended_down;
 };
+
 struct game_controller_struct {
   bool is_analog;
 
@@ -108,6 +109,7 @@ struct game_controller_struct {
     };
   };
 };
+
 struct game_input_struct {
   game_controller_struct controllers[4];
 };
