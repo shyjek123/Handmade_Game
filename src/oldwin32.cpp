@@ -14,6 +14,7 @@
 global bool global_running;
 
 //  INFO: AUDIO VARS
+
 global IXAudio2 *pXAudio2{0};
 global IXAudio2SourceVoice *source_voice{0};
 

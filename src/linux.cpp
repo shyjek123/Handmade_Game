@@ -1,10 +1,15 @@
+#define ALSA_PCM_NEW_HW_PARAMS_API
+
 #include "game.h"
 #include <time.h>
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <alsa/asoundlib.h>
 
 /* TODO: reimplement game, to work linux native
  *  priorities: 
  *  1. add sound output, (Sine Wave)
+ *  for sound use stream type playback and RW_INTERLEAVED
  *  2. add game memory
  *  3. ensure everything adds up to what we have so far in olwin32
  *
@@ -22,6 +27,21 @@
  *
  *
  */
+
+//init audio vars here
+//sourcevoice and lib structure
+//
+constexpr double PI = 3.14159265358979323846;
+struct linux_sound_info_struct{
+  uint16_t bits_per_sample;
+  uint32_t samples_per_second;
+  double tonehz;
+  double volume;
+  uint16_t size_in_cycles;
+  uint32_t samples_per_cycle;
+  uint32_t size_in_samples;
+  uint32_t size_in_bytes;
+};
 
 struct linux_offscreen_buffer_struct{
   XImage *image;
@@ -42,27 +62,13 @@ struct screen_dimensions_struct{
 internal screen_dimensions_struct linux_get_window_dimensions(Display *display, Window window);
 internal void linux_resize_image_section(Display *display, int screen, linux_offscreen_buffer_struct *buffer, int width, int height);
 internal void linux_display_offscreen_buffer(Display* display, Window window, GC gc, XImage *image, int x, int y, unsigned int width, unsigned int height );
-internal void linux_handle_key_input(game_button_state_struct *new_key_state, bool key_status);
+// internal void linux_handle_key_input(game_button_state_struct *new_key_state, bool key_status);
 internal void linux_debug_print(const char* msg);
+internal void linux_setup_audio(linux_sound_info_struct *linux_sound_info);
+internal void linux_fill_soundbuffer(int16_t *buffer, linux_sound_info_struct *info_struct);
+internal void game_Render_Colors(int x, int y,XImage *buffer);
 
 global bool global_running;
-
-
-// TODO: *source_voice{0}
-
-internal void game_Render_Colors(int x, int y,XImage *buffer) {
-  uint8_t *Row = (uint8_t *)buffer->data;
-  uint32_t *Pixel;
-  for (int pixelY = 0; pixelY < buffer->height; ++pixelY) {
-    Pixel = (uint32_t *)Row;
-    for (int pixelX = 0; pixelX < buffer->width; ++pixelX) {
-      uint8_t Green = (uint8_t)(pixelX + x);
-      uint8_t Blue = (uint8_t)(pixelY + y);
-      *Pixel++ = (Green << 8) | Blue;
-    }
-    Row += buffer->bytes_per_line;
-  }
-}
 
 int main() {
     Display* display = XOpenDisplay(NULL);
@@ -96,10 +102,6 @@ int main() {
         &attributes                 // Pointer to the attribute structure
     );
 
-  uint64_t frequency_res;
-  QueryPerformanceFrequency(&frequency_res);
-  int64_t frequency = frequency_res.QuadPart;
-
   if (window){
     GC gc{}; 
 
@@ -117,8 +119,21 @@ int main() {
 
 
     /*TODO: 
-      1. setup sound structs and info
+      setup sound structs and info
+      allocate memory for audio
     */
+    linux_sound_info_struct linux_sound_info = {};
+    linux_sound_info.bits_per_sample = 16;
+    linux_sound_info.samples_per_second = 44100;
+    linux_sound_info.tonehz= 440.0;
+    linux_sound_info.volume = 10.0;
+    linux_sound_info.size_in_cycles = 10;
+    linux_sound_info.samples_per_cycle = (int)(linux_sound_info.samples_per_second / linux_sound_info.tonehz);
+    linux_sound_info.size_in_samples = linux_sound_info.samples_per_cycle * linux_sound_info.size_in_cycles;
+    linux_sound_info.size_in_bytes = (linux_sound_info.size_in_samples * linux_sound_info.bits_per_sample)/8;
+
+    linux_setup_audio(&linux_sound_info);
+    global_running = false;
 
 #if HANDMADE_DEV
     //void *base_address = (void *)terabytes((uint64_t)2);
@@ -139,8 +154,8 @@ int main() {
     
     game_input_struct input[2] = {};
     game_input_struct *new_input = &input[0];
-    game_input_struct *old_input = &input[1];
-
+    // game_input_struct *old_input = &input[1];
+    //
 
     while (global_running) {
       /*TODO:
@@ -164,7 +179,7 @@ int main() {
               game_Render_Colors(x, y, global_offscreen_buffer.image);
               linux_display_offscreen_buffer(display, window, gc, global_offscreen_buffer.image, 0, 0, dims.width, dims.height);
               XFreeGC(display, gc);
-              break;2. No Window Has Input Focus
+              break; //2. No Window Has Input Focus
 
             case ConfigureNotify:
               //window resize
@@ -183,52 +198,55 @@ int main() {
                   global_running = false;
               }
             
-              uint32_t keysym = (uint32_t)msg.wParam;
-              bool was_down = (((msg.lParam & (1 << 30)) != 0));
-              bool is_down = (((msg.lParam & (1 << 31)) == 0));
-              if (was_down != is_down) {
-                if (keysym == 'W') {
-
-                  linux_Handle_Key_Input(&keyboard_controller->l_shoulder,
-                                         is_down);
-                } else if (keysym == 'A') {
-
-                  linux_Handle_Key_Input(&keyboard_controller->l_shoulder,
-                                         is_down);
-                  // Process the INS key.
-                } else if (keysym == 'S') {
-
-                  linux_Handle_Key_Input(&keyboard_controller->l_shoulder,
-                                         is_down);
-                } else if (keysym == 'D') {
-
-                  linux_Handle_Key_Input(&keyboard_controller->l_shoulder,
-                                         is_down);
-                } else if (keysym == 'Q') {
-                  linux_Handle_Key_Input(&keyboard_controller->l_shoulder,
-                                         is_down);
-                } else if (keysym == 'E') {
-                  linux_Handle_Key_Input(&keyboard_controller->r_shoulder,
-                                         is_down);
-                } else if (keysym == XK_Left) {
-                  linux_Handle_Key_Input(&keyboard_controller->left, is_down);
-                } else if (keysym == XK_Right) {
-                  linux_Handle_Key_Input(&keyboard_controller->right, is_down);
-                } else if (keysym == XK_Up) {
-                  linux_Handle_Key_Input(&keyboard_controller->up, is_down);
-                } else if (keysym == XK_Down) {
-                  linux_Handle_Key_Input(&keyboard_controller->down, is_down);
-                } else if (keysym == XK_Escape) {
-                  global_running = false;
-                }
-              } else if (keysym == XK_space) {
-                linux_debug_print("SPACE PRESSED");
-              }
-
-              bool alt_key_was_down = ((msg.lParam & (1 << 29)) != 0);
-              if (keysym == XK_F4 && alt_key_was_down) {
-                global_running = false;
-              }
+            
+              // keysym = (uint32_t)msg.wParam;
+              // bool was_down = (((msg.lParam & (1 << 30)) != 0));
+              // bool is_down = (((msg.lParam & (1 << 31)) == 0));
+              // if (was_down != is_down) {
+              //   if (keysym == 'W') {
+              //
+              //     linux_handle_key_input(&keyboard_controller->l_shoulder,
+              //                            is_down);
+              //   } else if (keysym == 'A') {
+              //
+              //     linux_handle_key_input(&keyboard_controller->l_shoulder,
+              //                            is_down);
+              //     // Process the INS key.
+              //   } else if (keysym == 'S') {
+              //
+              //     linux_handle_key_input(&keyboard_controller->l_shoulder,
+              //                            is_down);
+              //   } else if (keysym == 'D') {
+              //
+              //     linux_handle_key_input(&keyboard_controller->l_shoulder,
+              //                            is_down);
+              //   } else if (keysym == 'Q') {
+              //     linux_handle_key_input(&keyboard_controller->l_shoulder,
+              //                            is_down);
+              //   } else if (keysym == 'E') {
+              //     linux_handle_key_input(&keyboard_controller->r_shoulder,
+              //                            is_down);
+              //   } else if (keysym == XK_Left) {
+              //     linux_handle_key_input(&keyboard_controller->left, is_down);
+              //   } else if (keysym == XK_Right) {
+              //     linux_handle_key_input(&keyboard_controller->right, is_down);
+              //   } else if (keysym == XK_Up) {
+              //     linux_handle_key_input(&keyboard_controller->up, is_down);
+              //   } else if (keysym == XK_Down) {
+              //     linux_handle_key_input(&keyboard_controller->down, is_down);
+              //   } else if (keysym == XK_Escape) {
+              //     global_running = false;
+              //   }
+              // } else if (keysym == XK_space) {
+              //   linux_debug_print("SPACE PRESSED");
+              // }
+              //
+              // bool alt_key_was_down = ((msg.lParam & (1 << 29)) != 0);
+              // if (keysym == XK_F4 && alt_key_was_down) {
+              //   global_running = false;
+              // }
+            }
+            break;
 
             case ClientMessage:
                 // Close the window if the user clicked the Window Manager close button
@@ -285,17 +303,23 @@ int main() {
       double mega_cycles_per_second =
           ((double)cycles_elapsed / seconds) / 1000000.0;
 
+      const char *format = "%.02fms/f %.02ff/s %.02fmc/s\n";
+
+
       char buffer[256];
-      linux_debug_print(
+      snprintf(
           buffer,
           sizeof(buffer),
-          "%.02fms/f %.02ff/s %.02fmc/s\n",
+          format,
           ms_per_frame,
           fps,
           mega_cycles_per_second);
 
+      linux_debug_print(buffer);
+
       last_counter = end_counter;
       last_cpu_clock = end_cpu_clock;    
+
     }
 
     if(global_offscreen_buffer.image){
@@ -305,9 +329,7 @@ int main() {
 
     XDestroyWindow(display, window);
     XCloseDisplay(display);
-  }else{
-  //TODO: logging
-  }
+    }
   return 0;
 }
 
@@ -374,9 +396,151 @@ internal void linux_debug_print(const char* msg) {
     fflush(stderr); // Force it to print immediately
 }
 
-internal void linux_handle_key_input(game_button_state_struct *new_key_state,
-                                     bool key_status){
-  new_key_state->ended_down = key_status;
-  ++new_key_state->half_transition_count;
+// internal void linux_handle_key_input(game_button_state_struct *new_key_state,
+//                                      bool key_status){
+//   new_key_state->ended_down = key_status;
+//   ++new_key_state->half_transition_count;
+//
+// }
 
+
+internal void linux_setup_audio(linux_sound_info_struct *linux_sound_info){
+  long num_loops;
+  int result;
+  int size;
+  snd_pcm_t *handle;
+  snd_pcm_hw_params_t *params;
+  unsigned int period_time;
+  int dir;
+  snd_pcm_uframes_t frames;
+  int16_t *buffer;
+
+  /* Open PCM device for playback. */
+  result = snd_pcm_open(&handle, "default",
+                    SND_PCM_STREAM_PLAYBACK, 0);
+  if (result < 0) {
+    fprintf(stderr,
+            "unable to open pcm device: %s\n",
+            snd_strerror(result));
+    exit(1);
+  }
+
+  /* Allocate a hardware parameters object. */
+  snd_pcm_hw_params_alloca(&params);
+
+  /* Fill it in with default period_timeues. */
+  snd_pcm_hw_params_any(handle, params);
+
+  /* Set the desired hardware parameters. */
+
+  /* Interleaved mode */
+  snd_pcm_hw_params_set_access(handle, params,
+                      SND_PCM_ACCESS_RW_INTERLEAVED);
+
+  /* Signed 16-bit little-endian format */
+  snd_pcm_hw_params_set_format(handle, params,
+                              SND_PCM_FORMAT_S16_LE);
+
+  /* Two channels (stereo) */
+  snd_pcm_hw_params_set_channels(handle, params, 2);
+
+  /* 44100 bits/second sampling rate (CD quality) */
+  period_time = linux_sound_info->samples_per_second;
+  snd_pcm_hw_params_set_rate_near(handle, params,
+                                  &period_time, &dir);
+
+  frames = linux_sound_info->samples_per_cycle;
+  snd_pcm_hw_params_set_period_size_near(handle,
+                              params, &frames, &dir);
+
+  /* Write the parameters to the driver */
+  result = snd_pcm_hw_params(handle, params);
+  if (result < 0) {
+    fprintf(stderr,
+            "unable to set hw parameters: %s\n",
+            snd_strerror(result));
+    exit(1);
+  }
+
+  /* Use a buffer large enough to hold one period */
+  snd_pcm_hw_params_get_period_size(params, &frames,
+                                    &dir);
+  size = frames * 4; /* 2 bytes/sample, 2 channels */
+  buffer = (int16_t*) malloc(size);
+
+  /* We want to loop for 5 seconds */
+  snd_pcm_hw_params_get_period_time(params,
+                                    &period_time, &dir);
+  /* 5 seconds in microseconds divided by
+   * period time */
+  num_loops = 5000000 / period_time;
+
+  while (num_loops > 0) {
+    num_loops--;
+      //add fill soundbuffer function
+    linux_fill_soundbuffer(buffer, linux_sound_info);
+    // if (result == 0) {
+    //   fprintf(stderr, "end of file on input\n");
+    //   break;
+    // } else if (result != size) {
+    //   fprintf(stderr,
+    //           "short read: read %d bytes\n", result);
+    // }
+    result = snd_pcm_writei(handle, buffer, frames);
+    if (result == -EPIPE) {
+      /* EPIPE means underrun */
+      fprintf(stderr, "underrun occurred\n");
+      snd_pcm_prepare(handle);
+      snd_pcm_writei(handle, buffer, frames);
+    } else if (result < 0) {
+      fprintf(stderr,
+              "error from writei: %s\n",
+              snd_strerror(result));
+    }  else if (result != (int)frames) {
+      fprintf(stderr,
+              "short write, write %d frames\n", result);
+    }
+  }
+
+  snd_pcm_drain(handle);
+  snd_pcm_close(handle);
+  free(buffer);
 }
+
+internal void linux_fill_soundbuffer(int16_t *buffer, linux_sound_info_struct *info_struct) {
+
+   local_persist double phase{};
+
+   int16_t *bufferOut = buffer;
+   double phaseIncrement =
+       (2.0 * 3.14159265358979323846 * 1.0f /
+        (info_struct->samples_per_second/ (float)info_struct->tonehz));
+
+   for (uint32_t bufferIndex = 0; bufferIndex < info_struct->samples_per_second; ++bufferIndex) {
+     double sineVal = sin(phase);
+     int16_t sampleVal = (int16_t)(sineVal * info_struct->volume);
+
+     *bufferOut++ = sampleVal;
+     *bufferOut++ = sampleVal;
+
+     phase += phaseIncrement;
+     if (phase > (2.0 * 3.14159265358979323846))
+       phase -= (2.0 * 3.14159265358979323846);
+   }
+}
+
+internal void game_Render_Colors(int x, int y,XImage *buffer) {
+  uint8_t *Row = (uint8_t *)buffer->data;
+  uint32_t *Pixel;
+  for (int pixelY = 0; pixelY < buffer->height; ++pixelY) {
+    Pixel = (uint32_t *)Row;
+    for (int pixelX = 0; pixelX < buffer->width; ++pixelX) {
+      uint8_t Green = (uint8_t)(pixelX + x);
+      uint8_t Blue = (uint8_t)(pixelY + y);
+      *Pixel++ = (Green << 8) | Blue;
+    }
+    Row += buffer->bytes_per_line;
+  }
+}
+
+

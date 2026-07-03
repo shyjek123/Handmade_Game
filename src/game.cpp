@@ -1,19 +1,19 @@
 #include "game.h"
 
-internal void game_Render_Colors(game_state_struct *game_state,
-                                 game_offscreen_buffer_struct *buffer) {
-  uint8_t *Row = (uint8_t *)buffer->memory;
-  uint32_t *Pixel;
-  for (int pixelY = 0; pixelY < buffer->height; ++pixelY) {
-    Pixel = (uint32_t *)Row;
-    for (int pixelX = 0; pixelX < buffer->width; ++pixelX) {
-      uint8_t Green = (uint8_t)(pixelX + game_state->x);
-      uint8_t Blue = (uint8_t)(pixelY + game_state->y);
-      *Pixel++ = (Green << 8) | Blue;
-    }
-    Row += buffer->pitch;
-  }
-}
+// internal void game_Render_Colors(game_state_struct *game_state,
+//                                  game_offscreen_buffer_struct *buffer) {
+//   uint8_t *Row = (uint8_t *)buffer->memory;
+//   uint32_t *Pixel;
+//   for (int pixelY = 0; pixelY < buffer->height; ++pixelY) {
+//     Pixel = (uint32_t *)Row;
+//     for (int pixelX = 0; pixelX < buffer->width; ++pixelX) {
+//       uint8_t Green = (uint8_t)(pixelX + game_state->x);
+//       uint8_t Blue = (uint8_t)(pixelY + game_state->y);
+//       *Pixel++ = (Green << 8) | Blue;
+//     }
+//     Row += buffer->pitch;
+//   }
+// }
 //
 // internal void game_Sound_Out(game_state_struct *game_state,
 //                              game_sound_buffer_struct *sound) {

@@ -10,4 +10,5 @@ g++ \
 -DHANDMADE_WIN32=1 \
 src/linux.cpp \
 -lX11 \
+-lasound \
 -o game

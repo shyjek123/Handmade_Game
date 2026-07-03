@@ -5,8 +5,8 @@
 #include <cstdio>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <X11/Xutil.h>
 #include <stdlib.h>
+#include <x86intrin.h> // Required header for __rdtsc
 
 #define internal static
 #define local_persist static
@@ -55,11 +55,13 @@ struct game_offscreen_buffer_struct {
   int bytes_per_pixel;
   int pitch;
 };
+
 struct game_sound_buffer_struct {
   int16_t *samples;
-  int sampleCount;
-  int samplesPerSecond;
+  int sample_count;
+  int samples_per_second;
 };
+
 struct game_state_struct {
   double x;
   double y;
@@ -114,6 +116,10 @@ struct game_input_struct {
   game_controller_struct controllers[4];
 };
 
+
+// internal void game_Sound_Out(game_state_struct *game_state,
+//                              game_sound_buffer_struct *sound);
+//
 // internal void game_Render_Colors(game_state_struct *game_state,
 //                                  game_offscreen_buffer_struct buffer);
 //
