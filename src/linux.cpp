@@ -133,18 +133,17 @@ int main() {
     linux_sound_info.size_in_bytes = (linux_sound_info.size_in_samples * linux_sound_info.bits_per_sample)/8;
 
     linux_setup_audio(&linux_sound_info);
-    global_running = false;
 
 #if HANDMADE_DEV
     //void *base_address = (void *)terabytes((uint64_t)2);
 #else
     //void *base_address = 0;
 #endif
+
 /*
  *TODO:
   1. setup and alloc game memory
   2. check if everything alloced
-  3. initialize input structs
  * */
 
 
@@ -320,16 +319,17 @@ int main() {
       last_counter = end_counter;
       last_cpu_clock = end_cpu_clock;    
 
-    }
+         }
+  }
+   if(global_offscreen_buffer.image){
+          global_offscreen_buffer.image->data = NULL;
+          XDestroyImage(global_offscreen_buffer.image);
+        }
 
-    if(global_offscreen_buffer.image){
-      global_offscreen_buffer.image->data = NULL;
-      XDestroyImage(global_offscreen_buffer.image);
-    }
 
     XDestroyWindow(display, window);
     XCloseDisplay(display);
-    }
+
   return 0;
 }
 
@@ -413,7 +413,7 @@ internal void linux_setup_audio(linux_sound_info_struct *linux_sound_info){
   unsigned int period_time;
   int dir;
   snd_pcm_uframes_t frames;
-  int16_t *buffer;
+//  int16_t *buffer;
 
   /* Open PCM device for playback. */
   result = snd_pcm_open(&handle, "default",
@@ -465,8 +465,10 @@ internal void linux_setup_audio(linux_sound_info_struct *linux_sound_info){
   /* Use a buffer large enough to hold one period */
   snd_pcm_hw_params_get_period_size(params, &frames,
                                     &dir);
-  size = frames * 4; /* 2 bytes/sample, 2 channels */
-  buffer = (int16_t*) malloc(size);
+//  size = frames * 4; /* 2 bytes/sample, 2 channels */
+  size = 88200;
+  int16_t samples[size];
+  //buffer = (int16_t*) malloc(size);
 
   /* We want to loop for 5 seconds */
   snd_pcm_hw_params_get_period_time(params,
@@ -478,7 +480,7 @@ internal void linux_setup_audio(linux_sound_info_struct *linux_sound_info){
   while (num_loops > 0) {
     num_loops--;
       //add fill soundbuffer function
-    linux_fill_soundbuffer(buffer, linux_sound_info);
+    linux_fill_soundbuffer(samples, linux_sound_info);
     // if (result == 0) {
     //   fprintf(stderr, "end of file on input\n");
     //   break;
@@ -486,12 +488,18 @@ internal void linux_setup_audio(linux_sound_info_struct *linux_sound_info){
     //   fprintf(stderr,
     //           "short read: read %d bytes\n", result);
     // }
-    result = snd_pcm_writei(handle, buffer, frames);
+    
+    snd_pcm_prepare(handle);
+    result = snd_pcm_writei(handle, samples, frames);
+    
+    /*
+     * check for EAGAIN error code, means ring buf is full
+     * quee another buf only if result != EAGAIN
+     */
     if (result == -EPIPE) {
       /* EPIPE means underrun */
       fprintf(stderr, "underrun occurred\n");
-      snd_pcm_prepare(handle);
-      snd_pcm_writei(handle, buffer, frames);
+      snd_pcm_writei(handle, samples, frames);
     } else if (result < 0) {
       fprintf(stderr,
               "error from writei: %s\n",
@@ -500,11 +508,15 @@ internal void linux_setup_audio(linux_sound_info_struct *linux_sound_info){
       fprintf(stderr,
               "short write, write %d frames\n", result);
     }
+
   }
+
+  snd_pcm_start(handle);
+
 
   snd_pcm_drain(handle);
   snd_pcm_close(handle);
-  free(buffer);
+//  free(buffer);
 }
 
 internal void linux_fill_soundbuffer(int16_t *buffer, linux_sound_info_struct *info_struct) {
