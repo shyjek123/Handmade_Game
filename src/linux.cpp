@@ -8,7 +8,6 @@
 
 /* TODO: reimplement game, to work linux native
  *  priorities: 
- *  1. add sound output, (Sine Wave)
  *  for sound use stream type playback and RW_INTERLEAVED
  *  2. add game memory
  *  3. ensure everything adds up to what we have so far in olwin32
@@ -43,6 +42,18 @@ struct linux_sound_info_struct{
   uint32_t size_in_bytes;
 };
 
+typedef struct{
+    const char *device;
+    int16_t *buf;
+    unsigned int len;
+    snd_pcm_t *handle;
+    snd_pcm_sframes_t frames;
+    uint32_t samples_per_second;
+    double tonehz;
+    double volume;
+  } sound_buffer;
+
+
 struct linux_offscreen_buffer_struct{
   XImage *image;
   void *memory;
@@ -64,8 +75,8 @@ internal void linux_resize_image_section(Display *display, int screen, linux_off
 internal void linux_display_offscreen_buffer(Display* display, Window window, GC gc, XImage *image, int x, int y, unsigned int width, unsigned int height );
 // internal void linux_handle_key_input(game_button_state_struct *new_key_state, bool key_status);
 internal void linux_debug_print(const char* msg);
-internal void linux_setup_audio(linux_sound_info_struct *linux_sound_info);
-internal void linux_fill_soundbuffer(int16_t *buffer, linux_sound_info_struct *info_struct);
+internal void linux_setup_audio();
+internal void linux_fill_soundbuffer(sound_buffer *info_struct);
 internal void game_Render_Colors(int x, int y,XImage *buffer);
 
 global bool global_running;
@@ -132,7 +143,7 @@ int main() {
     linux_sound_info.size_in_samples = linux_sound_info.samples_per_cycle * linux_sound_info.size_in_cycles;
     linux_sound_info.size_in_bytes = (linux_sound_info.size_in_samples * linux_sound_info.bits_per_sample)/8;
 
-    linux_setup_audio(&linux_sound_info);
+   linux_setup_audio();
 
 #if HANDMADE_DEV
     //void *base_address = (void *)terabytes((uint64_t)2);
@@ -403,134 +414,106 @@ internal void linux_debug_print(const char* msg) {
 //
 // }
 
+internal void linux_setup_audio(){
+  int err;
+  unsigned int i;
+  sound_buffer sbuf;
+  memset(&sbuf, 0, sizeof(sbuf));
+  sbuf.device = "default";
+  sbuf.len = 16*1024;
+  sbuf.samples_per_second = 44100;
+  sbuf.tonehz = 256.0;
+  sbuf.volume = 10.0;
+  int16_t samples[88200];
+  sbuf.buf= samples;
+  char buffer[256];
 
-internal void linux_setup_audio(linux_sound_info_struct *linux_sound_info){
-  long num_loops;
-  int result;
-  int size;
-  snd_pcm_t *handle;
-  snd_pcm_hw_params_t *params;
-  unsigned int period_time;
-  int dir;
-  snd_pcm_uframes_t frames;
-//  int16_t *buffer;
+  //TODO: placeholder to fill sound buf function
+  linux_fill_soundbuffer(&sbuf);
 
-  /* Open PCM device for playback. */
-  result = snd_pcm_open(&handle, "default",
-                    SND_PCM_STREAM_PLAYBACK, 0);
-  if (result < 0) {
-    fprintf(stderr,
-            "unable to open pcm device: %s\n",
-            snd_strerror(result));
+  if((err=snd_pcm_open(&sbuf.handle, sbuf.device, SND_PCM_STREAM_PLAYBACK, 0)) < 0){
+    const char *format = "pcm_open error: %s\n";
+    snprintf(
+          buffer,
+          sizeof(buffer),
+          format,
+          snd_strerror(err));
+    linux_debug_print(buffer);
+    exit(1);
+  }
+  if((err = snd_pcm_set_params(sbuf.handle,
+                               SND_PCM_FORMAT_S16_LE,
+                               SND_PCM_ACCESS_RW_INTERLEAVED,
+                               2,
+                               44100,
+                               1,
+                               500000))<0){
+    const char *format = "snd_pcm_set_params error: %s\n";
+      snprintf(
+          buffer,
+          sizeof(buffer),
+          format,
+          snd_strerror(err));
+      linux_debug_print(buffer);
     exit(1);
   }
 
-  /* Allocate a hardware parameters object. */
-  snd_pcm_hw_params_alloca(&params);
-
-  /* Fill it in with default period_timeues. */
-  snd_pcm_hw_params_any(handle, params);
-
-  /* Set the desired hardware parameters. */
-
-  /* Interleaved mode */
-  snd_pcm_hw_params_set_access(handle, params,
-                      SND_PCM_ACCESS_RW_INTERLEAVED);
-
-  /* Signed 16-bit little-endian format */
-  snd_pcm_hw_params_set_format(handle, params,
-                              SND_PCM_FORMAT_S16_LE);
-
-  /* Two channels (stereo) */
-  snd_pcm_hw_params_set_channels(handle, params, 2);
-
-  /* 44100 bits/second sampling rate (CD quality) */
-  period_time = linux_sound_info->samples_per_second;
-  snd_pcm_hw_params_set_rate_near(handle, params,
-                                  &period_time, &dir);
-
-  frames = linux_sound_info->samples_per_cycle;
-  snd_pcm_hw_params_set_period_size_near(handle,
-                              params, &frames, &dir);
-
-  /* Write the parameters to the driver */
-  result = snd_pcm_hw_params(handle, params);
-  if (result < 0) {
-    fprintf(stderr,
-            "unable to set hw parameters: %s\n",
-            snd_strerror(result));
-    exit(1);
-  }
-
-  /* Use a buffer large enough to hold one period */
-  snd_pcm_hw_params_get_period_size(params, &frames,
-                                    &dir);
-//  size = frames * 4; /* 2 bytes/sample, 2 channels */
-  size = 88200;
-  int16_t samples[size];
-  //buffer = (int16_t*) malloc(size);
-
-  /* We want to loop for 5 seconds */
-  snd_pcm_hw_params_get_period_time(params,
-                                    &period_time, &dir);
-  /* 5 seconds in microseconds divided by
-   * period time */
-  num_loops = 5000000 / period_time;
-
-  while (num_loops > 0) {
-    num_loops--;
-      //add fill soundbuffer function
-    linux_fill_soundbuffer(samples, linux_sound_info);
-    // if (result == 0) {
-    //   fprintf(stderr, "end of file on input\n");
-    //   break;
-    // } else if (result != size) {
-    //   fprintf(stderr,
-    //           "short read: read %d bytes\n", result);
-    // }
-    
-    snd_pcm_prepare(handle);
-    result = snd_pcm_writei(handle, samples, frames);
-    
-    /*
-     * check for EAGAIN error code, means ring buf is full
-     * quee another buf only if result != EAGAIN
-     */
-    if (result == -EPIPE) {
-      /* EPIPE means underrun */
-      fprintf(stderr, "underrun occurred\n");
-      snd_pcm_writei(handle, samples, frames);
-    } else if (result < 0) {
-      fprintf(stderr,
-              "error from writei: %s\n",
-              snd_strerror(result));
-    }  else if (result != (int)frames) {
-      fprintf(stderr,
-              "short write, write %d frames\n", result);
+  for(i = 0; i < 16; i++){
+    sbuf.frames = snd_pcm_writei(sbuf.handle, sbuf.buf, 44100);
+    if(sbuf.frames < 0){
+      sbuf.frames = snd_pcm_recover(sbuf.handle, sbuf.frames, 0);
     }
+    if(sbuf.frames < 0){
+    const char *format = "writei error: %s\n";
+      snprintf(
+          buffer,
+          sizeof(buffer),
+          format,
+          snd_strerror(err));
+      linux_debug_print(buffer);
 
+
+      break;
+    }
+    if(sbuf.frames > 0 && sbuf.frames < (long)sbuf.len){
+    const char *format = "short write (expected: %li, wrote %li)\n";
+      snprintf(
+          buffer,
+          sizeof(buffer),
+          format,
+          (long)sbuf.len,
+          sbuf.frames);
+      linux_debug_print(buffer);
+    }
   }
 
-  snd_pcm_start(handle);
+  err = snd_pcm_drain(sbuf.handle);
+  if(err != 0){
+    const char *format = "snd_pcm_drain error: %s\n";
+      snprintf(
+          buffer,
+          sizeof(buffer),
+          format,
+          snd_strerror(err));
+      linux_debug_print(buffer);
+  }
+  snd_pcm_close(sbuf.handle);
 
-
-  snd_pcm_drain(handle);
-  snd_pcm_close(handle);
-//  free(buffer);
 }
 
-internal void linux_fill_soundbuffer(int16_t *buffer, linux_sound_info_struct *info_struct) {
+internal void linux_fill_soundbuffer(sound_buffer *info_struct) {
+   int16_t toneVol = 30000;
 
    local_persist double phase{};
 
-   int16_t *bufferOut = buffer;
+   int16_t *bufferOut = info_struct->buf;
    double phaseIncrement =
        (2.0 * 3.14159265358979323846 * 1.0f /
         (info_struct->samples_per_second/ (float)info_struct->tonehz));
 
    for (uint32_t bufferIndex = 0; bufferIndex < info_struct->samples_per_second; ++bufferIndex) {
      double sineVal = sin(phase);
-     int16_t sampleVal = (int16_t)(sineVal * info_struct->volume);
+     int16_t sampleVal = (int16_t)(sineVal * toneVol);
 
      *bufferOut++ = sampleVal;
      *bufferOut++ = sampleVal;
