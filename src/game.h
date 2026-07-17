@@ -34,18 +34,18 @@ inline uint32_t safe_uint64_truncate(uint64_t num) {
 }
 
 #if 1
-// NOTE: not for final game, does block and does not protect against data loss
-//
-// struct debug_win32_fileIO_struct {
-//   uint32_t size;
-//   void *data;
-// };
-//
-// internal debug_win32_fileIO_struct debug_win32_ReadFile(char *filename);
-// internal bool debug_win32_WriteFile(char *filename, uint32_t size,
-//                                     void *memory);
-// internal void debug_win32_FreeFile(void *memory);
-//
+
+//not for final game only debugging
+struct debug_lin_fileIO_struct {
+  uint32_t size;
+  void *data;
+};
+
+internal debug_lin_fileIO_struct debug_lin_readfile(char *filename);
+internal bool debug_lin_writefile(char *filename, uint32_t size,
+                                    void *memory);
+internal void debug_lin_freefile(void *memory, uint32_t *size);
+
 #endif
 
 struct game_offscreen_buffer_struct {
@@ -58,7 +58,7 @@ struct game_offscreen_buffer_struct {
 
 struct game_sound_buffer_struct {
   int16_t *samples;
-  int sample_count;
+  uint32_t sample_count;
   int samples_per_second;
 };
 
@@ -67,16 +67,17 @@ struct game_state_struct {
   double y;
 
   int tonehz;
-  int16_t toneVol;
+  int16_t tonevol;
 };
+
 struct game_memory_struct {
-  bool isInitialized;
+  bool is_initialized;
 
   void *permanent;
-  uint64_t permanentSize;
+  uint64_t permanent_size;
 
   void *ram;
-  uint64_t ramSize;
+  uint64_t ram_size;
 };
 
 struct game_button_state_struct {
@@ -106,8 +107,8 @@ struct game_controller_struct {
       game_button_state_struct down;
       game_button_state_struct left;
       game_button_state_struct right;
-      game_button_state_struct l_shoulder;
-      game_button_state_struct r_shoulder;
+      game_button_state_struct lshoulder;
+      game_button_state_struct rshoulder;
     };
   };
 };
@@ -117,17 +118,14 @@ struct game_input_struct {
 };
 
 
-// internal void game_Sound_Out(game_state_struct *game_state,
-//                              game_sound_buffer_struct *sound);
-//
-// internal void game_Render_Colors(game_state_struct *game_state,
-//                                  game_offscreen_buffer_struct buffer);
-//
-// internal void game_Sound_Out(game_state_struct *game_state,
-//                              game_sound_buffer_struct *sound);
-//
-// internal void game_Update_Render(game_state_struct *game_memory,
-//                                  game_offscreen_buffer_struct *buffer,
-//                                  game_sound_buffer_struct *sound);
+internal void game_sound_out(game_state_struct *game_state,
+                             game_sound_buffer_struct *sound);
+
+internal void game_render_colors(game_state_struct *game_state,
+                                 game_offscreen_buffer_struct *buffer);
+
+internal void game_update_render(game_memory_struct *game_memory,
+                                 game_offscreen_buffer_struct *buffer,
+                                 game_sound_buffer_struct *sound);
 #define HANDMADE_H
 #endif
