@@ -15,7 +15,7 @@
 #define kilobytes(amount) ((amount) * 1024)
 #define megabytes(amount) (kilobytes(amount) * 1024)
 #define gigabytes(amount) (megabytes(amount) * 1024)
-#define terabytes(amount) (megabytes(amount) * 1024)
+#define terabytes(amount) (gigabytes(amount) * 1024)
 
 #define arraycount(arr) (sizeof(arr) / sizeof((arr)[0]))
 
@@ -59,7 +59,7 @@ struct game_offscreen_buffer_struct {
 struct game_sound_buffer_struct {
   int16_t *samples;
   uint32_t sample_count;
-  int samples_per_second;
+  int sample_rate;
 };
 
 struct game_state_struct {

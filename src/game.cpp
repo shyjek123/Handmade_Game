@@ -23,7 +23,7 @@ internal void game_sound_out(game_state_struct *game_state,
   int16_t *bufferOut = sound->samples;
   double phaseIncrement =
       (2.0 * 3.14159265358979323846 * 1.0f /
-       (sound->samples_per_second/ (float)game_state->tonehz));
+       (sound->sample_rate / (float)game_state->tonehz));
 
   for (uint32_t bufferIndex = 0; bufferIndex < sound->sample_count; ++bufferIndex) {
     double sineVal = sin(phase);
@@ -44,7 +44,7 @@ internal void game_update_render(game_memory_struct *game_memory,
 
   game_state_struct *game_state = (game_state_struct *)game_memory->permanent;
 
-  assert(sizeof(game_state) <= game_memory->permanent_size);
+  assert(sizeof(*game_state) <= game_memory->permanent_size);
 
   if (!game_memory->is_initialized) {
     game_memory->is_initialized = true;
@@ -57,7 +57,7 @@ internal void game_update_render(game_memory_struct *game_memory,
         debug_lin_readfile((char *)__FILE__);
     if (file_info.data) {
       debug_lin_writefile(
-          (char *)"/home/chillguy/projects/Handmade_Game/data",
+          (char *)"/home/bastek/projects/handmade/data/test.txt",
           file_info.size, file_info.data);
     }
   }

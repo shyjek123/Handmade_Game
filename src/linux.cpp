@@ -36,7 +36,7 @@ struct lin_sound_info_struct{
   const char *device;
   snd_pcm_t *handle;
   uint16_t bits_per_sample;
-  uint32_t samples_per_second;
+  uint32_t sample_rate;
   double tonehz;
   double volume;
   uint16_t size_in_cycles;
@@ -76,6 +76,7 @@ internal void debug_lin_freefile(void *memory, uint32_t *size);
 
 global bool global_running;
 
+//FIX: audio stops when interating with the window, it should be a constant stream
 int main() {
     Display* display = XOpenDisplay(NULL);
     if (display == NULL) {
@@ -131,11 +132,11 @@ int main() {
     lin_sound_info_struct linux_sound_info = {};
     linux_sound_info.device = "default";
     linux_sound_info.bits_per_sample = 16;
-    linux_sound_info.samples_per_second = 44100;
+    linux_sound_info.sample_rate = 44100;
     linux_sound_info.tonehz= 256.0;
     linux_sound_info.volume = 10.0;
     linux_sound_info.size_in_cycles = 10;
-    linux_sound_info.samples_per_cycle = (int)(linux_sound_info.samples_per_second / linux_sound_info.tonehz);
+    linux_sound_info.samples_per_cycle = (int)(linux_sound_info.sample_rate / linux_sound_info.tonehz);
     linux_sound_info.size_in_samples = linux_sound_info.samples_per_cycle * linux_sound_info.size_in_cycles;
     linux_sound_info.size_in_bytes = (linux_sound_info.size_in_samples * linux_sound_info.bits_per_sample)/8;
     linux_sound_info.nchannels = 2;
@@ -159,7 +160,7 @@ int main() {
                                  SND_PCM_FORMAT_S16_LE,
                                  SND_PCM_ACCESS_RW_INTERLEAVED,
                                  linux_sound_info.nchannels,
-                                 linux_sound_info.samples_per_second,
+                                 linux_sound_info.sample_rate,
                                  1,     //softresample, uses software if hardware cant compensate rate
                                  30000// target latency
                                  ))<0){
@@ -169,11 +170,15 @@ int main() {
             sizeof(buffer),
             format,
             snd_strerror(err));
-        linux_debug_print(buffer);
+      linux_debug_print(buffer);
       exit(1);
     }
 
     int16_t *main_audio = (int16_t *)mmap(NULL, 88200, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if(main_audio == MAP_FAILED){
+      linux_debug_print("error with mmap allocating main audio");
+      exit(1);
+    }
 
 
 #if HANDMADE_DEV
@@ -186,8 +191,12 @@ int main() {
     game_memory.permanent_size = megabytes(64);
     game_memory.ram_size = gigabytes((uint16_t)1);
 
-    uint16_t total_memory = game_memory.permanent_size + game_memory.ram_size;
+    uint64_t total_memory = game_memory.permanent_size + game_memory.ram_size;
     game_memory.permanent = mmap(base_address, total_memory, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if(game_memory.permanent == MAP_FAILED){
+      linux_debug_print("error with mmap allocating game_memory.permanent");
+      exit(1);
+    }
     game_memory.ram = ((uint8_t *)game_memory.permanent + game_memory.permanent_size);
     
     uint64_t last_cpu_clock = __rdtsc();
@@ -345,49 +354,48 @@ int main() {
       
         int16_t samples[88200];
         game_sound_buffer_struct game_sound_buffer = {};
-        game_sound_buffer.samples_per_second = linux_sound_info.samples_per_second;
-        game_sound_buffer.sample_count = linux_sound_info.samples_per_second/60;
+        game_sound_buffer.sample_rate = linux_sound_info.sample_rate;
+        game_sound_buffer.sample_count = (linux_sound_info.sample_rate / 60);
         game_sound_buffer.samples = samples;
+
+        snd_pcm_uframes_t buffer_size;
+        snd_pcm_uframes_t period_size;
+        snd_pcm_get_params(linux_sound_info.handle, &buffer_size, &period_size);
+
         snd_pcm_uframes_t frames_avail;
         snd_pcm_sframes_t frames_written;
+        uint8_t buffer_queue;
+        int err;
+
 
         game_update_render(&game_memory, &game_offscreen_buffer, &game_sound_buffer);
 
-        if(snd_pcm_status(linux_sound_info.handle, pcm_status) == 0){
+        if((err = snd_pcm_status(linux_sound_info.handle, pcm_status)) == 0){
+
           frames_avail = snd_pcm_status_get_avail(pcm_status);
-          if(frames_avail > game_sound_buffer.sample_count){
+          buffer_queue = buffer_size - frames_avail;
+
+          if(buffer_queue < buffer_size && frames_avail > 0){
             lin_fill_soundbuffer(&game_sound_buffer, main_audio);
 
-            frames_written = snd_pcm_writei(linux_sound_info.handle, main_audio, game_sound_buffer.sample_count);
+            frames_written = snd_pcm_writei(linux_sound_info.handle, main_audio, (linux_sound_info.sample_rate/60));
             if(frames_written < 0){
-              frames_written = snd_pcm_recover(linux_sound_info.handle, frames_written, 0);
-            }
-            if(frames_written < 0){
+              snd_pcm_recover(linux_sound_info.handle, frames_written, 0);
               const char *format = "writei error: %s\n";
-                snprintf(
-                    buffer,
-                    sizeof(buffer),
-                    format,
-                    snd_strerror(frames_written));
-                linux_debug_print(buffer);
-            }else{
-              frames_written = snd_pcm_writei(linux_sound_info.handle, main_audio, linux_sound_info.samples_per_second);
+                  snprintf(
+                      buffer,
+                      sizeof(buffer),
+                      format,
+                      snd_strerror(frames_written));
+                  linux_debug_print(buffer);
+                }
+
+
             }
-
-          if(frames_written > 0 && frames_written < (long)game_sound_buffer.sample_count){
-              long missing_frames = game_sound_buffer.sample_count - frames_written;
-              frames_written = snd_pcm_writei(linux_sound_info.handle, main_audio, missing_frames);
-
-              const char *format = "short write (expected: %li, wrote %li)\n";
-                snprintf(
-                    buffer,
-                    sizeof(buffer),
-                    format,
-                    (long)sizeof(samples),
-                    frames_written);
-                linux_debug_print(buffer);
-              }
-          }
+        }else{
+            const char *format = "pcm_status != 0, code: %d\n";
+            snprintf(buffer, sizeof(buffer), format, snd_strerror(err), frames_written);
+            linux_debug_print(buffer);
         }
 
         linux_display_offscreen_buffer(display, window, gc, global_offscreen_buffer.image, 0, 0, game_offscreen_buffer.width, game_offscreen_buffer.height);
@@ -444,7 +452,7 @@ int main() {
    if(global_offscreen_buffer.image){
           global_offscreen_buffer.image->data = NULL;
           XDestroyImage(global_offscreen_buffer.image);
-        }
+      }
 
 
     XDestroyWindow(display, window);
@@ -452,6 +460,7 @@ int main() {
 
   return 0;
 }
+
 
 
 internal screen_dimensions_struct linux_get_window_dimensions(Display *display, Window window){
@@ -512,6 +521,7 @@ internal void linux_display_offscreen_buffer(Display* display, Window window, GC
 }
 
 internal void linux_debug_print(const char* msg) {
+  //TODO: add option to add args, similar to main, argc, argv
     fprintf(stderr, "[DEBUG] %s\n", msg);
     fflush(stderr); // Force it to print immediately
 }
@@ -523,7 +533,7 @@ internal void linux_handle_key_input(game_button_state_struct *new_key_state,
 }
 
 internal void debug_lin_freefile(void *memory, uint32_t *size){
-  munmap(memory, (size_t)size);
+  munmap(memory, *size);
 }
 
 internal debug_lin_fileIO_struct debug_lin_readfile(char *filename){
@@ -531,7 +541,13 @@ internal debug_lin_fileIO_struct debug_lin_readfile(char *filename){
   struct stat st;
   debug_lin_fileIO_struct fileio{};
 
-  fd = open(filename, O_RDONLY | O_CREAT);
+  fd = open(filename, O_RDONLY);
+
+  if(fd == -1){
+    //TODO: logging
+    linux_debug_print("error with open() in readfile");
+    exit(1);
+  }
 
   if(fstat(fd, &st) == -1) {
     linux_debug_print("fstat failed"); 
@@ -540,9 +556,13 @@ internal debug_lin_fileIO_struct debug_lin_readfile(char *filename){
   }
 
   fileio.size = (size_t)st.st_size;
-  fileio.data= mmap(NULL, fileio.size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if(!(fileio.size == 0)){
+    fileio.data= mmap(NULL, fileio.size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  }else{
+    linux_debug_print("file.size in debug_lin_readfile, <= 0");
+  }
 
-  if(fileio.data){
+  if(fileio.data != MAP_FAILED){
     fileio.size = read(fd, fileio.data, fileio.size);
     if(fileio.size == (uint32_t)-1){
       linux_debug_print("read failed");
@@ -567,19 +587,28 @@ internal bool debug_lin_writefile(char* filename, uint32_t size, void *memory){
   bool result = false;
   ssize_t bytes_written;
 
-  fd = open(filename, O_WRONLY | O_CREAT);
-
+  fd = open(filename, O_WRONLY | O_CREAT | O_APPEND, 0644);
   if(fd == -1){
-    //TODO: logging
-    linux_debug_print("error with open() in writefile");
+    //TODO: possible error in game msg to the user, does not exit program
+    const char *format = "write file open() error: %d\n";
+    char buffer[256];
+    snprintf(
+          buffer,
+          sizeof(buffer),
+          format,
+          errno);
+    linux_debug_print(buffer);
+    exit(1);
   }
-
-  bytes_written = write(fd, memory, size);
+      bytes_written = write(fd, memory, size);
   if(bytes_written == -1){
   //logging
     linux_debug_print("error with write() in writefile");
   }
   result = (bytes_written == size);
+
+  if(fd)
+    close(fd);
 
   return result;
 }
@@ -590,7 +619,7 @@ internal void lin_fill_soundbuffer(game_sound_buffer_struct *src_sound_buf,
 
   int16_t *dst = dst_sound_buf;
 
-  for (uint32_t bufferIndex = 0; bufferIndex < src_sound_buf->sample_count;
+  for (uint32_t bufferIndex = 0; bufferIndex < src_sound_buf->sample_count*2;
        ++bufferIndex) {
 
     *dst++ = src_sound_buf->samples[bufferIndex];
